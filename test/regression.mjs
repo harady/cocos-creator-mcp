@@ -5,7 +5,7 @@
  * 実行: node test/regression.mjs [port]
  */
 
-const PORT = process.argv[2] || 3001;
+const PORT = process.argv[2] || 3000;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 let passed = 0;
