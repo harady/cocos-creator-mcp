@@ -103,6 +103,16 @@ export class DebugTools implements ToolCategory {
                 inputSchema: { type: "object", properties: {} },
             },
             {
+                name: "debug_screenshot",
+                description: "Take a screenshot of the editor window and save to a file. Returns the file path of the saved PNG.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        savePath: { type: "string", description: "File path to save the PNG (default: temp/screenshots/screenshot_<timestamp>.png)" },
+                    },
+                },
+            },
+            {
                 name: "debug_get_extension_info",
                 description: "Get detailed information about a specific extension.",
                 inputSchema: {
@@ -153,6 +163,8 @@ export class DebugTools implements ToolCategory {
                 case "debug_open_url":
                     await (Editor.Message.request as any)("program", "open-url", args.url);
                     return ok({ success: true, url: args.url });
+                case "debug_screenshot":
+                    return this.takeScreenshot(args.savePath);
                 case "debug_validate_scene":
                     return this.validateScene();
                 case "debug_get_extension_info":
@@ -308,6 +320,47 @@ export class DebugTools implements ToolCategory {
             if (!fs.existsSync(logPath)) return ok({ success: true, exists: false });
             const stat = fs.statSync(logPath);
             return ok({ success: true, exists: true, path: logPath, size: stat.size, modified: stat.mtime });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async takeScreenshot(savePath?: string): Promise<ToolResult> {
+        try {
+            const fs = require("fs");
+            const path = require("path");
+            const electron = require("electron");
+            const windows = electron.BrowserWindow.getAllWindows();
+            if (!windows || windows.length === 0) {
+                return err("No editor window found");
+            }
+            // Find the main (largest) window
+            let win = windows[0];
+            let maxArea = 0;
+            for (const w of windows) {
+                const bounds = w.getBounds();
+                const area = bounds.width * bounds.height;
+                if (area > maxArea) {
+                    maxArea = area;
+                    win = w;
+                }
+            }
+            // Bring to front and wait for render
+            win.show();
+            await new Promise(r => setTimeout(r, 300));
+            const image = await win.webContents.capturePage();
+            const pngBuffer = image.toPNG();
+
+            // Determine save path
+            if (!savePath) {
+                const dir = path.join(Editor.Project.tmpDir, "screenshots");
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+                savePath = path.join(dir, `screenshot_${timestamp}.png`);
+            }
+
+            fs.writeFileSync(savePath, pngBuffer);
+            return ok({ success: true, path: savePath, size: pngBuffer.length });
         } catch (e: any) {
             return err(e.message || String(e));
         }
