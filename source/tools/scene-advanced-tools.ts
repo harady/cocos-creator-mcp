@@ -116,7 +116,7 @@ export class SceneAdvancedTools implements ToolCategory {
                 case "scene_snapshot":
                     return ok(await (Editor.Message.request as any)("scene", "snapshot"));
                 case "scene_query_dirty": {
-                    const dirty = await (Editor.Message.request as any)("scene", "query-is-dirty");
+                    const dirty = await (Editor.Message.request as any)("scene", "query-dirty");
                     return ok({ success: true, dirty });
                 }
                 case "scene_query_classes": {

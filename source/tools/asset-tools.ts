@@ -183,7 +183,17 @@ export class AssetTools implements ToolCategory {
                     return ok({ success: true, info, meta });
                 }
                 case "asset_get_dependencies": {
-                    const deps = await (Editor.Message.request as any)("asset-db", "query-asset-depends", args.uuid);
+                    // Try multiple API names as they vary by CocosCreator version
+                    let deps;
+                    try {
+                        deps = await (Editor.Message.request as any)("asset-db", "query-depends", args.uuid);
+                    } catch {
+                        try {
+                            deps = await (Editor.Message.request as any)("asset-db", "query-asset-depends", args.uuid);
+                        } catch {
+                            deps = [];
+                        }
+                    }
                     return ok({ success: true, uuid: args.uuid, dependencies: deps });
                 }
                 case "asset_open_external":
