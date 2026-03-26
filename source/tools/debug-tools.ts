@@ -127,7 +127,7 @@ export class DebugTools implements ToolCategory {
             },
             {
                 name: "debug_preview",
-                description: "Start or refresh the game preview (equivalent to clicking the Play button in the editor toolbar).",
+                description: "Start the game preview. Uses Preview in Editor by default (auto-opens MainScene if needed). Falls back to browser preview if editor preview fails.",
                 inputSchema: { type: "object", properties: {} },
             },
             {
@@ -356,7 +356,29 @@ export class DebugTools implements ToolCategory {
 
     private async startPreview(): Promise<ToolResult> {
         try {
-            // Preview in Editor: scene:editor-preview-set-play
+            // MainSceneが開いていなければ開く
+            const hierarchy = await Editor.Message.request("scene", "execute-scene-script", {
+                name: "cocos-creator-mcp",
+                method: "getSceneHierarchy",
+                args: [false],
+            }).catch(() => null);
+
+            if (!hierarchy?.sceneName || hierarchy.sceneName === "scene-2d") {
+                // MainSceneを探して開く
+                const scenes = await Editor.Message.request("asset-db", "query-assets", {
+                    ccType: "cc.SceneAsset",
+                    pattern: "db://assets/**/*",
+                });
+                const mainScene = Array.isArray(scenes) ? scenes.find((s: any) =>
+                    s.name?.includes("Main") || s.name?.includes("main")
+                ) || scenes[0] : null;
+                if (mainScene) {
+                    await (Editor.Message.request as any)("scene", "open-scene", mainScene.uuid);
+                    await new Promise(r => setTimeout(r, 1500));
+                }
+            }
+
+            // Preview in Editor
             const isPlaying = await (Editor.Message.request as any)("scene", "editor-preview-set-play", true);
             return ok({ success: true, isPlaying, mode: "editor" });
         } catch (e: any) {
