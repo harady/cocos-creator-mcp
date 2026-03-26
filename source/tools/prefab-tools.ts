@@ -164,11 +164,10 @@ export class PrefabTools implements ToolCategory {
 
     private async assetExists(path: string): Promise<boolean> {
         try {
-            // db://パスからファイル名を抽出してquery-assetsで検索
-            const results = await Editor.Message.request("asset-db", "query-assets", { pattern: path.replace(/\.prefab$/, "") + ".*" });
+            const pattern = path.replace(/\.prefab$/, "") + ".*";
+            const results = await Editor.Message.request("asset-db", "query-assets", { pattern });
             return (results || []).length > 0;
         } catch {
-            // query-assetsも失敗する場合はquery-asset-infoでフォールバック
             try {
                 const info = await (Editor.Message.request as any)("asset-db", "query-asset-info", path);
                 return !!info;
