@@ -47,22 +47,26 @@ function skip(label) {
     skipped++;
 }
 
-// ── ALL 120 tool names ──
+// ── ALL 145 tool names ──
 const ALL_TOOLS = [
-    "asset_copy", "asset_create", "asset_delete", "asset_get_dependencies",
-    "asset_get_details", "asset_move", "asset_open_external", "asset_query_path",
-    "asset_query_url", "asset_query_uuid", "asset_reimport", "asset_save",
+    "asset_copy", "asset_create", "asset_delete", "asset_generate_available_url",
+    "asset_get_dependencies", "asset_get_details", "asset_import", "asset_move",
+    "asset_open_external", "asset_query_missing", "asset_query_path", "asset_query_ready",
+    "asset_query_url", "asset_query_users", "asset_query_uuid", "asset_reimport",
+    "asset_save", "asset_save_meta",
     "builder_get_settings", "builder_open_panel", "builder_query_tasks",
     "builder_run_preview", "builder_stop_preview",
     "component_add", "component_get_available", "component_get_components",
     "component_get_info", "component_remove", "component_set_property",
     "debug_clear_console", "debug_execute_script", "debug_get_console_logs",
-    "debug_get_editor_info", "debug_get_extension_info", "debug_list_extensions", "debug_list_messages",
-    "node_create", "node_delete", "node_duplicate", "node_find_by_name", "node_get_all",
-    "node_get_info", "node_move", "node_set_active", "node_set_layer",
+    "debug_get_editor_info", "debug_get_extension_info", "debug_get_log_file_info",
+    "debug_get_project_logs", "debug_list_extensions", "debug_list_messages",
+    "debug_open_url", "debug_query_devices", "debug_search_project_logs", "debug_validate_scene",
+    "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
+    "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
     "node_set_property", "node_set_transform",
-    "prefab_create", "prefab_get_info", "prefab_instantiate", "prefab_list",
-    "prefab_revert", "prefab_update",
+    "prefab_create", "prefab_duplicate", "prefab_get_info", "prefab_instantiate",
+    "prefab_list", "prefab_revert", "prefab_update", "prefab_validate",
     "preferences_get", "preferences_get_all", "preferences_reset", "preferences_set",
     "project_find_asset", "project_get_asset_info", "project_get_engine_info",
     "project_get_info", "project_get_settings", "project_query_scripts",
@@ -70,15 +74,18 @@ const ALL_TOOLS = [
     "refimage_add", "refimage_clear_all", "refimage_list", "refimage_query_config",
     "refimage_query_current", "refimage_refresh", "refimage_remove",
     "refimage_set_opacity", "refimage_set_position", "refimage_set_scale", "refimage_switch",
-    "scene_close", "scene_copy_node", "scene_create", "scene_cut_node",
+    "scene_begin_undo", "scene_cancel_undo", "scene_close", "scene_copy_node",
+    "scene_create", "scene_cut_node", "scene_end_undo",
     "scene_execute_component_method", "scene_execute_script", "scene_get_current",
     "scene_get_hierarchy", "scene_get_list", "scene_move_array_element",
     "scene_open", "scene_paste_node", "scene_query_classes",
-    "scene_query_component_has_script", "scene_query_components", "scene_query_dirty",
-    "scene_query_node_tree", "scene_query_nodes_by_asset", "scene_query_ready",
+    "scene_query_component", "scene_query_component_has_script", "scene_query_components",
+    "scene_query_dirty", "scene_query_node", "scene_query_node_tree",
+    "scene_query_nodes_by_asset", "scene_query_ready", "scene_query_scene_bounds",
     "scene_remove_array_element", "scene_reset_component", "scene_reset_node_transform",
-    "scene_reset_property", "scene_restore_prefab", "scene_save",
-    "scene_snapshot", "scene_snapshot_abort", "scene_soft_reload",
+    "scene_reset_property", "scene_restore_prefab", "scene_save", "scene_save_as",
+    "scene_set_parent", "scene_snapshot", "scene_snapshot_abort", "scene_soft_reload",
+    "server_check_connectivity", "server_get_network_interfaces",
     "server_get_status", "server_query_ip_list", "server_query_port",
     "view_align_view_with_node", "view_align_with_view",
     "view_change_gizmo_coordinate", "view_change_gizmo_pivot", "view_change_gizmo_tool",
@@ -96,7 +103,7 @@ async function testHealth() {
     const res = await fetch(`${BASE}/health`);
     const data = await res.json();
     assert(data.status === "ok", "health status ok");
-    assert(data.tools >= 120, `tool count >= 120 (got ${data.tools})`);
+    assert(data.tools >= 145, `tool count >= 145 (got ${data.tools})`);
 }
 
 async function testInitialize() {
@@ -111,7 +118,7 @@ async function testToolsList() {
     console.log("\n── tools/list ──");
     const res = await callMcp("tools/list", {});
     const tools = res.result?.tools || [];
-    assert(tools.length >= 120, `tool count >= 120 (got ${tools.length})`);
+    assert(tools.length >= 145, `tool count >= 145 (got ${tools.length})`);
 
     const names = tools.map((t) => t.name);
     for (const name of ALL_TOOLS) {
@@ -404,6 +411,56 @@ async function testReferenceImageTools() {
     assert(current.success === true || !current._rpcError, "query_current");
 }
 
+async function testNewEditorAPIs() {
+    console.log("\n── new Editor APIs (beyond existing MCP) ──");
+
+    // scene_query_node
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (canvasUuid) {
+        const nodeDump = await callTool("scene_query_node", { uuid: canvasUuid });
+        assert(nodeDump.success === true || !nodeDump._rpcError, "query_node");
+    }
+
+    // asset_query_ready
+    const ready = await callTool("asset_query_ready");
+    assert(ready.success === true || !ready._rpcError, "asset_query_ready");
+
+    // asset_generate_available_url
+    const avail = await callTool("asset_generate_available_url", { url: "db://assets/test/TestGenerated.prefab" });
+    assert(avail.success === true || !avail._rpcError, "asset_generate_available_url");
+
+    // server_check_connectivity
+    const conn = await callTool("server_check_connectivity");
+    assert(conn.success === true, "server_check_connectivity");
+
+    // server_get_network_interfaces
+    const net = await callTool("server_get_network_interfaces");
+    assert(net.success === true, "server_get_network_interfaces");
+
+    // node_detect_type
+    if (canvasUuid) {
+        const detect = await callTool("node_detect_type", { uuid: canvasUuid });
+        assert(detect.success === true, "node_detect_type");
+        assert(detect.nodeType === "2D", `Canvas is 2D: ${detect.nodeType}`);
+    }
+
+    // debug_get_log_file_info
+    const logInfo = await callTool("debug_get_log_file_info");
+    assert(logInfo.success === true, "debug_get_log_file_info");
+
+    // debug_validate_scene
+    const valid = await callTool("debug_validate_scene");
+    assert(valid.success === true, "debug_validate_scene");
+
+    // prefab_validate (use MainScene UUID)
+    const scenes = await callTool("scene_get_list");
+    if (scenes.scenes?.length > 0) {
+        const pv = await callTool("prefab_validate", { uuid: scenes.scenes[0].uuid });
+        assert(pv.success === true || !pv._rpcError, "prefab_validate");
+    }
+}
+
 // ── runner ──
 
 async function main() {
@@ -437,6 +494,7 @@ async function main() {
     await testComponentAdvanced();
     await testProjectAdvanced();
     await testReferenceImageTools();
+    await testNewEditorAPIs();
 
     console.log(`\n${"═".repeat(40)}`);
     console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);
