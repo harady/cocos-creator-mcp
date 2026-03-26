@@ -308,14 +308,15 @@ curl http://127.0.0.1:3000/health
 
 ## Client Scripts
 
-The `client/` directory contains TypeScript files to be copied into your Cocos Creator project. These enable runtime communication between the game preview and the MCP server.
+The `client/` directory contains TypeScript files for runtime communication between the game preview and the MCP server. Since the extension is installed in `extensions/`, these files can be imported directly — no copying needed.
 
 ### McpConsoleCapture
 
 Captures `console.log/warn/error` from the game preview and sends them to the MCP server.
 
 ```typescript
-import { initMcpConsoleCapture } from "./path/to/McpConsoleCapture";
+// Import from extensions/ (adjust relative path as needed)
+import { initMcpConsoleCapture } from "../../extensions/cocos-creator-mcp/client/McpConsoleCapture";
 initMcpConsoleCapture();
 ```
 
@@ -324,7 +325,7 @@ initMcpConsoleCapture();
 Enables AI-driven game control: screenshots, node clicking, and custom commands.
 
 ```typescript
-import { initMcpDebugClient } from "./path/to/McpDebugClient";
+import { initMcpDebugClient } from "../../extensions/cocos-creator-mcp/client/McpDebugClient";
 
 initMcpDebugClient({
     customCommands: {
