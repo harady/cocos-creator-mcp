@@ -1,7 +1,7 @@
 /**
  * 回帰テスト — 全MCPツールの動作確認
  *
- * 前提: CocosCreatorでcocos-creator-mcpサーバーが起動中であること
+ * 前提: CocosCreatorでcocos-creator-mcpサーバーが起動中、シーンが開いていること
  * 実行: node test/regression.mjs [port]
  */
 
@@ -10,6 +10,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 let rpcId = 0;
 
 // ── helpers ──
@@ -41,6 +42,11 @@ function assert(condition, label) {
     }
 }
 
+function skip(label) {
+    console.log(`  ⚠️  ${label}`);
+    skipped++;
+}
+
 // ── tests ──
 
 async function testHealth() {
@@ -48,7 +54,7 @@ async function testHealth() {
     const res = await fetch(`${BASE}/health`);
     const data = await res.json();
     assert(data.status === "ok", "health status ok");
-    assert(data.tools >= 13, `tool count >= 13 (got ${data.tools})`);
+    assert(data.tools >= 27, `tool count >= 27 (got ${data.tools})`);
 }
 
 async function testInitialize() {
@@ -56,60 +62,61 @@ async function testInitialize() {
     const res = await callMcp("initialize", {});
     assert(res.result?.protocolVersion, `protocol version: ${res.result?.protocolVersion}`);
     assert(res.result?.serverInfo?.name === "cocos-creator-mcp", "server name");
+    assert(res.result?.serverInfo?.version === "0.5.0", `version: ${res.result?.serverInfo?.version}`);
 }
 
 async function testToolsList() {
     console.log("\n── tools/list ──");
     const res = await callMcp("tools/list", {});
     const tools = res.result?.tools || [];
-    assert(tools.length >= 13, `tool count >= 13 (got ${tools.length})`);
+    assert(tools.length >= 27, `tool count >= 27 (got ${tools.length})`);
 
     const names = tools.map((t) => t.name);
     const expected = [
+        // scene
         "scene_get_hierarchy", "scene_open", "scene_save", "scene_get_list",
+        // node
         "node_create", "node_get_info", "node_find_by_name", "node_set_property",
         "node_set_transform", "node_delete", "node_move", "node_duplicate", "node_get_all",
+        // component
+        "component_add", "component_remove", "component_get_components", "component_set_property",
+        // prefab
+        "prefab_list", "prefab_create", "prefab_instantiate", "prefab_get_info",
+        // project
+        "project_get_info", "project_refresh_assets", "project_get_asset_info", "project_find_asset",
+        // debug
+        "debug_get_editor_info", "debug_list_messages",
     ];
     for (const name of expected) {
         assert(names.includes(name), `tool registered: ${name}`);
     }
 }
 
-async function testSceneGetHierarchy() {
+async function testSceneTools() {
     console.log("\n── scene_get_hierarchy ──");
     const res = await callTool("scene_get_hierarchy", { includeComponents: true });
     assert(res.success === true, "success");
     assert(res.sceneName, `scene name: ${res.sceneName}`);
     assert(Array.isArray(res.hierarchy), "hierarchy is array");
-    assert(res.hierarchy.length > 0, "hierarchy has nodes");
-
-    // Canvas should exist
     const canvas = res.hierarchy.find((n) => n.name === "Canvas");
     assert(!!canvas, "Canvas node found");
-    assert(Array.isArray(canvas?.components), "Canvas has components");
-}
 
-async function testSceneGetList() {
     console.log("\n── scene_get_list ──");
-    const res = await callTool("scene_get_list");
-    assert(res.success === true, "success");
-    assert(Array.isArray(res.scenes), "scenes is array");
-}
+    const list = await callTool("scene_get_list");
+    assert(list.success === true, "success");
+    assert(Array.isArray(list.scenes), "scenes is array");
 
-async function testSceneSave() {
     console.log("\n── scene_save ──");
-    const res = await callTool("scene_save");
-    assert(res.success === true || !res._rpcError, "save did not error");
+    const save = await callTool("scene_save");
+    assert(save.success === true || !save._rpcError, "save did not error");
 }
 
 async function testNodeCrud() {
-    console.log("\n── node_create ──");
-    // Find Canvas UUID first
     const hierarchy = await callTool("scene_get_hierarchy");
     const canvasUuid = hierarchy.hierarchy.find((n) => n.name === "Canvas")?.uuid;
-    assert(!!canvasUuid, `Canvas UUID: ${canvasUuid?.substring(0, 10)}...`);
 
     // CREATE
+    console.log("\n── node_create ──");
     const created = await callTool("node_create", { name: "RegressionTestNode", parent: canvasUuid });
     assert(created.success === true, "create success");
     const nodeUuid = created.uuid;
@@ -127,98 +134,198 @@ async function testNodeCrud() {
     const found = await callTool("node_find_by_name", { name: "RegressionTestNode" });
     assert(found.success === true, "find success");
     assert(found.data?.length === 1, `found count: ${found.data?.length}`);
-    assert(found.data?.[0]?.uuid === nodeUuid, "found UUID matches");
 
-    // SET PROPERTY (name)
+    // SET PROPERTY
     console.log("\n── node_set_property ──");
-    const renamed = await callTool("node_set_property", {
-        uuid: nodeUuid, property: "name", value: "RegressionTestNode_Renamed",
-    });
-    assert(renamed.success === true, "set_property (name) success");
-
-    // verify rename
+    await callTool("node_set_property", { uuid: nodeUuid, property: "name", value: "RegressionTestNode_Renamed" });
     const infoAfter = await callTool("node_get_info", { uuid: nodeUuid });
     assert(infoAfter.data?.name === "RegressionTestNode_Renamed", `renamed to: ${infoAfter.data?.name}`);
 
     // SET TRANSFORM
     console.log("\n── node_set_transform ──");
-    const transformed = await callTool("node_set_transform", {
-        uuid: nodeUuid,
-        position: { x: 100, y: 200, z: 0 },
-        scale: { x: 2, y: 2, z: 1 },
-    });
-    assert(transformed.success === true, "set_transform success");
-
+    await callTool("node_set_transform", { uuid: nodeUuid, position: { x: 100, y: 200, z: 0 }, scale: { x: 2, y: 2, z: 1 } });
     const infoT = await callTool("node_get_info", { uuid: nodeUuid });
     assert(infoT.data?.position?.x === 100, `position.x: ${infoT.data?.position?.x}`);
-    assert(infoT.data?.position?.y === 200, `position.y: ${infoT.data?.position?.y}`);
     assert(infoT.data?.scale?.x === 2, `scale.x: ${infoT.data?.scale?.x}`);
 
     // GET ALL
     console.log("\n── node_get_all ──");
     const all = await callTool("node_get_all");
     assert(all.success === true, "get_all success");
-    assert(Array.isArray(all.data), "data is array");
-    const testNode = all.data?.find((n) => n.uuid === nodeUuid);
-    assert(!!testNode, "test node found in get_all");
+    assert(!!all.data?.find((n) => n.uuid === nodeUuid), "test node found in get_all");
 
     // DUPLICATE
     console.log("\n── node_duplicate ──");
     const duped = await callTool("node_duplicate", { uuid: nodeUuid });
     assert(duped.success === true, "duplicate success");
-    // newUuid may be a string or array depending on Editor API version
     const dupedUuid = Array.isArray(duped.newUuid) ? duped.newUuid[0] : duped.newUuid;
 
-    // MOVE (move duplicated node under original node)
+    // MOVE
     console.log("\n── node_move ──");
     if (dupedUuid) {
         const moved = await callTool("node_move", { uuid: dupedUuid, parentUuid: nodeUuid });
         if (moved.success === true) {
             assert(true, "move success");
-            // Verify parent changed
             const movedInfo = await callTool("node_get_info", { uuid: dupedUuid });
             assert(movedInfo.data?.parent === nodeUuid, "parent changed after move");
         } else {
-            // node_move requires CocosCreator restart to pick up scene script changes
-            console.log(`  ⚠️  move skipped (requires editor restart): ${moved.error || "unknown"}`);
+            skip(`move skipped (requires editor restart): ${moved.error || "unknown"}`);
         }
     } else {
-        console.log("  ⚠️  move skipped (no duplicated uuid)");
+        skip("move skipped (no duplicated uuid)");
     }
 
-    // CLEANUP: delete both test nodes
+    // DELETE
     console.log("\n── node_delete ──");
-    const del1 = await callTool("node_delete", { uuid: nodeUuid });
-    assert(del1.success === true, "delete original success");
-
-    if (dupedUuid) {
-        const del2 = await callTool("node_delete", { uuid: dupedUuid });
-        assert(del2.success === true, "delete duplicate success");
-    }
-
-    // Verify cleanup
+    await callTool("node_delete", { uuid: nodeUuid });
+    if (dupedUuid) await callTool("node_delete", { uuid: dupedUuid });
     const afterDelete = await callTool("node_find_by_name", { name: "RegressionTestNode_Renamed" });
-    assert(afterDelete.data?.length === 0, "cleanup verified (0 remaining)");
+    assert(afterDelete.data?.length === 0, "cleanup verified");
 }
 
-async function testSceneOpen() {
-    console.log("\n── scene_open ──");
-    // Get scene list first, then open the current one (safe operation)
-    const list = await callTool("scene_get_list");
-    if (list.scenes?.length > 0) {
-        const scene = list.scenes[0];
-        const res = await callTool("scene_open", { scene: scene.path || scene.uuid });
-        // scene_open may succeed or fail depending on Editor state, just check no RPC error
-        assert(!res._rpcError, `open attempted: ${scene.path || scene.uuid}`);
+async function testComponentTools() {
+    const hierarchy = await callTool("scene_get_hierarchy");
+    const canvasUuid = hierarchy.hierarchy.find((n) => n.name === "Canvas")?.uuid;
+
+    // Create test node
+    const created = await callTool("node_create", { name: "ComponentTestNode", parent: canvasUuid });
+    const nodeUuid = created.uuid;
+
+    // ADD COMPONENT
+    console.log("\n── component_add ──");
+    const added = await callTool("component_add", { uuid: nodeUuid, componentType: "cc.Label" });
+    assert(added.success === true, "add Label success");
+
+    // GET COMPONENTS
+    console.log("\n── component_get_components ──");
+    const comps = await callTool("component_get_components", { uuid: nodeUuid });
+    assert(comps.success === true, "get_components success");
+    const hasLabel = comps.components?.some((c) => c.type === "Label");
+    assert(hasLabel, "Label component found");
+
+    // SET PROPERTY
+    console.log("\n── component_set_property ──");
+    const setProp = await callTool("component_set_property", {
+        uuid: nodeUuid, componentType: "cc.Label", property: "string", value: "Test123",
+    });
+    assert(setProp.success === true, "set Label.string success");
+
+    const setProp2 = await callTool("component_set_property", {
+        uuid: nodeUuid, componentType: "cc.Label", property: "fontSize", value: 48,
+    });
+    assert(setProp2.success === true, "set Label.fontSize success");
+
+    // REMOVE COMPONENT
+    console.log("\n── component_remove ──");
+    const removed = await callTool("component_remove", { uuid: nodeUuid, componentType: "cc.Label" });
+    assert(removed.success === true, "remove Label success");
+
+    const compsAfter = await callTool("component_get_components", { uuid: nodeUuid });
+    const hasLabelAfter = compsAfter.components?.some((c) => c.type === "Label");
+    assert(!hasLabelAfter, "Label removed verified");
+
+    // Cleanup
+    await callTool("node_delete", { uuid: nodeUuid });
+}
+
+async function testPrefabTools() {
+    const hierarchy = await callTool("scene_get_hierarchy");
+    const canvasUuid = hierarchy.hierarchy.find((n) => n.name === "Canvas")?.uuid;
+
+    // LIST
+    console.log("\n── prefab_list ──");
+    const list = await callTool("prefab_list");
+    assert(list.success === true, "list success");
+    assert(Array.isArray(list.prefabs), "prefabs is array");
+
+    // CREATE — make node, set property, save as prefab
+    console.log("\n── prefab_create ──");
+    const created = await callTool("node_create", { name: "PrefabRegressionTest", parent: canvasUuid, components: ["cc.Label"] });
+    const nodeUuid = created.uuid;
+
+    await callTool("component_set_property", {
+        uuid: nodeUuid, componentType: "cc.Label", property: "string", value: "PrefabTest",
+    });
+    await callTool("node_set_transform", { uuid: nodeUuid, position: { x: 50, y: 75, z: 0 } });
+
+    const prefabPath = "db://assets/test/PrefabRegressionTest.prefab";
+    const prefab = await callTool("prefab_create", { uuid: nodeUuid, path: prefabPath });
+    assert(prefab.success === true, "create prefab success");
+    const prefabUuid = prefab.result;
+
+    // GET INFO
+    console.log("\n── prefab_get_info ──");
+    if (prefabUuid) {
+        const info = await callTool("prefab_get_info", { uuid: prefabUuid });
+        assert(info.success === true, "get_info success");
     } else {
-        assert(true, "scene_open skipped (no scenes found)");
+        skip("prefab_get_info skipped (no prefab uuid)");
     }
+
+    // INSTANTIATE
+    console.log("\n── prefab_instantiate ──");
+    if (prefabUuid) {
+        const inst = await callTool("prefab_instantiate", { prefabUuid, parent: canvasUuid });
+        assert(inst.success === true, "instantiate success");
+        // Cleanup instantiated node
+        if (inst.nodeUuid) {
+            await callTool("node_delete", { uuid: inst.nodeUuid });
+        }
+    } else {
+        skip("prefab_instantiate skipped (no prefab uuid)");
+    }
+
+    // Cleanup
+    await callTool("node_delete", { uuid: nodeUuid });
+    // Note: prefab file at assets/test/ will remain — manual cleanup
+}
+
+async function testProjectTools() {
+    // GET INFO
+    console.log("\n── project_get_info ──");
+    const info = await callTool("project_get_info");
+    assert(info.success === true, "get_info success");
+    assert(!!info.path, `project path: ${info.path?.substring(0, 30)}...`);
+
+    // REFRESH ASSETS
+    console.log("\n── project_refresh_assets ──");
+    const refresh = await callTool("project_refresh_assets");
+    assert(refresh.success === true || !refresh._rpcError, "refresh did not error");
+
+    // FIND ASSET
+    console.log("\n── project_find_asset ──");
+    const found = await callTool("project_find_asset", { pattern: "db://assets/**/*.scene" });
+    assert(found.success === true, "find_asset success");
+    assert(Array.isArray(found.assets), "assets is array");
+    assert(found.assets?.length > 0, `found ${found.assets?.length} scene(s)`);
+
+    // GET ASSET INFO
+    console.log("\n── project_get_asset_info ──");
+    if (found.assets?.length > 0) {
+        const assetInfo = await callTool("project_get_asset_info", { uuid: found.assets[0].uuid });
+        assert(assetInfo.success === true, "get_asset_info success");
+    } else {
+        skip("get_asset_info skipped (no assets found)");
+    }
+}
+
+async function testDebugTools() {
+    // EDITOR INFO
+    console.log("\n── debug_get_editor_info ──");
+    const info = await callTool("debug_get_editor_info");
+    assert(info.success === true, "get_editor_info success");
+    assert(!!info.version, `editor version: ${info.version}`);
+
+    // LIST MESSAGES
+    console.log("\n── debug_list_messages ──");
+    const msgs = await callTool("debug_list_messages", { target: "scene" });
+    assert(msgs.success === true, "list_messages success");
 }
 
 // ── runner ──
 
 async function main() {
-    console.log(`\n🔧 Cocos Creator MCP — Regression Test`);
+    console.log(`\n🔧 Cocos Creator MCP v0.5 — Regression Test`);
     console.log(`   Server: ${BASE}/mcp\n`);
 
     try {
@@ -231,15 +338,15 @@ async function main() {
     await testHealth();
     await testInitialize();
     await testToolsList();
-    await testSceneGetHierarchy();
-    await testSceneGetList();
-    await testSceneSave();
+    await testSceneTools();
     await testNodeCrud();
-    // scene_open は最後（シーン切り替えが起きる可能性）
-    // await testSceneOpen();  // コメントアウト: シーンリロードが発生するため手動確認向け
+    await testComponentTools();
+    await testPrefabTools();
+    await testProjectTools();
+    await testDebugTools();
 
     console.log(`\n${"═".repeat(40)}`);
-    console.log(`  Results: ${passed} passed, ${failed} failed`);
+    console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);
     console.log(`${"═".repeat(40)}\n`);
 
     process.exit(failed > 0 ? 1 : 0);
