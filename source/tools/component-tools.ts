@@ -140,8 +140,28 @@ export class ComponentTools implements ToolCategory {
 
     private async setProperty(uuid: string, componentType: string, property: string, value: any): Promise<ToolResult> {
         try {
-            const result = await this.sceneScript("setComponentProperty", [uuid, componentType, property, value]);
-            return ok(result);
+            // コンポーネントのインデックスを取得
+            const nodeInfo = await this.sceneScript("getNodeInfo", [uuid]);
+            if (!nodeInfo?.success || !nodeInfo?.data?.components) {
+                return err(`Node ${uuid} not found or has no components`);
+            }
+            const compName = componentType.replace("cc.", "");
+            const compIndex = nodeInfo.data.components.findIndex((c: any) => c.type === compName);
+            if (compIndex < 0) {
+                return err(`Component ${componentType} not found on node ${uuid}`);
+            }
+
+            // scene:set-property でプロパティ変更（Prefab保存時にも反映される）
+            // パス形式: __comps__.{index}.{property}
+            const path = `__comps__.${compIndex}.${property}`;
+            const dumpType = typeof value === "number" ? "Number"
+                : typeof value === "boolean" ? "Boolean"
+                : typeof value === "string" ? "String"
+                : undefined;
+            const dump = dumpType ? { value, type: dumpType } : { value };
+
+            const result = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
+            return ok({ success: true, path, dump, result });
         } catch (e: any) {
             return err(e.message || String(e));
         }
