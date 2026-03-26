@@ -1,5 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
+import { getGameLogs, clearGameLogs } from "../mcp-server";
 
 export class DebugTools implements ToolCategory {
     readonly categoryName = "debug";
@@ -36,11 +37,12 @@ export class DebugTools implements ToolCategory {
             },
             {
                 name: "debug_get_console_logs",
-                description: "Get recent console log entries from the editor.",
+                description: "Get recent console log entries. Automatically captures scene process logs (console.log/warn/error in scene scripts). Game preview logs can also be captured by sending POST requests to /log endpoint — see README for setup.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         count: { type: "number", description: "Max number of entries (default 50)" },
+                        level: { type: "string", description: "Filter by level: 'log', 'warn', or 'error'" },
                     },
                 },
             },
@@ -124,9 +126,17 @@ export class DebugTools implements ToolCategory {
                 case "debug_execute_script":
                     return this.executeScript(args.method, args.args || []);
                 case "debug_get_console_logs":
-                    return this.getConsoleLogs(args.count || 50);
+                    return this.getConsoleLogs(args.count || 50, args.level);
                 case "debug_clear_console":
                     Editor.Message.send("console", "clear");
+                    // Clear scene process log buffer
+                    await Editor.Message.request("scene", "execute-scene-script", {
+                        name: "cocos-creator-mcp",
+                        method: "clearConsoleLogs",
+                        args: [],
+                    }).catch(() => {});
+                    // Clear game preview log buffer
+                    clearGameLogs();
                     return ok({ success: true });
                 case "debug_list_extensions":
                     return this.listExtensions();
@@ -201,13 +211,45 @@ export class DebugTools implements ToolCategory {
         return ok(result);
     }
 
-    private async getConsoleLogs(_count: number): Promise<ToolResult> {
+    private async getConsoleLogs(count: number, level?: string): Promise<ToolResult> {
+        // 1. Try Editor's native console API first (may be supported in future CocosCreator versions)
         try {
-            const logs = await (Editor.Message.request as any)("console", "query-last-logs", _count);
-            return ok({ success: true, logs });
-        } catch {
-            return ok({ success: true, logs: [], note: "Console log query not supported in this editor version" });
-        }
+            const logs = await (Editor.Message.request as any)("console", "query-last-logs", count);
+            if (Array.isArray(logs) && logs.length > 0) {
+                return ok({ success: true, logs, source: "editor-api", note: "Using native Editor console API" });
+            }
+        } catch { /* Not supported in this version — use fallback */ }
+
+        // 2. Fallback: collect from scene process buffer + game preview buffer
+        let sceneLogs: any[] = [];
+        let gameLogs: any[] = [];
+
+        // 2a. Scene process logs (console wrapper in scene.ts)
+        try {
+            const result = await Editor.Message.request("scene", "execute-scene-script", {
+                name: "cocos-creator-mcp",
+                method: "getConsoleLogs",
+                args: [count * 2, level], // request more, will trim after merge
+            });
+            if (result?.logs) {
+                sceneLogs = result.logs.map((l: any) => ({ ...l, source: "scene" }));
+            }
+        } catch { /* scene not available */ }
+
+        // 2b. Game preview logs (received via POST /log endpoint)
+        const gameResult = getGameLogs(count * 2, level);
+        gameLogs = gameResult.logs.map((l: any) => ({ ...l, source: "game" }));
+
+        // Merge and sort by timestamp, take last `count`
+        const merged = [...sceneLogs, ...gameLogs]
+            .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+            .slice(-count);
+
+        return ok({
+            success: true,
+            logs: merged,
+            total: { scene: sceneLogs.length, game: gameResult.total },
+        });
     }
 
     private async listExtensions(): Promise<ToolResult> {
