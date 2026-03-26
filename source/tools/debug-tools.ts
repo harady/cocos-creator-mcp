@@ -127,8 +127,13 @@ export class DebugTools implements ToolCategory {
             },
             {
                 name: "debug_preview",
-                description: "Start the game preview. Uses Preview in Editor by default (auto-opens MainScene if needed). Falls back to browser preview if editor preview fails.",
-                inputSchema: { type: "object", properties: {} },
+                description: "Start or stop the game preview. Uses Preview in Editor (auto-opens MainScene if needed). Falls back to browser preview if editor preview fails.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        action: { type: "string", description: "'start' (default) or 'stop'" },
+                    },
+                },
             },
             {
                 name: "debug_clear_code_cache",
@@ -191,7 +196,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_screenshot":
                     return this.takeScreenshot(args.savePath);
                 case "debug_preview":
-                    return this.startPreview();
+                    return this.handlePreview(args.action || "start");
                 case "debug_clear_code_cache":
                     return this.clearCodeCache();
                 case "debug_validate_scene":
@@ -354,41 +359,107 @@ export class DebugTools implements ToolCategory {
         }
     }
 
+    private async handlePreview(action: string): Promise<ToolResult> {
+        if (action === "stop") {
+            return this.stopPreview();
+        }
+        return this.startPreview();
+    }
+
     private async startPreview(): Promise<ToolResult> {
         try {
-            // MainSceneが開いていなければ開く
-            const hierarchy = await Editor.Message.request("scene", "execute-scene-script", {
-                name: "cocos-creator-mcp",
-                method: "getSceneHierarchy",
-                args: [false],
-            }).catch(() => null);
+            await this.ensureMainSceneOpen();
 
-            if (!hierarchy?.sceneName || hierarchy.sceneName === "scene-2d") {
-                // MainSceneを探して開く
+            // ツールバーのVueインスタンス経由でplay()を呼ぶ（UI状態も同期される）
+            const played = await this.executeOnToolbar("start");
+            if (played) {
+                return ok({ success: true, action: "start", mode: "editor" });
+            }
+
+            // フォールバック: 直接API
+            const isPlaying = await (Editor.Message.request as any)("scene", "editor-preview-set-play", true);
+            return ok({ success: true, isPlaying, action: "start", mode: "editor", note: "direct API (toolbar UI may not sync)" });
+        } catch (e: any) {
+            try {
+                const electron = require("electron");
+                await electron.shell.openExternal("http://127.0.0.1:7456");
+                return ok({ success: true, action: "start", mode: "browser" });
+            } catch (e2: any) {
+                return err(e2.message || String(e2));
+            }
+        }
+    }
+
+    private async stopPreview(): Promise<ToolResult> {
+        try {
+            // ツールバー経由で停止（UI同期）
+            const stopped = await this.executeOnToolbar("stop");
+            if (!stopped) {
+                // フォールバック: 直接API
+                await (Editor.Message.request as any)("scene", "editor-preview-set-play", false);
+            }
+            // scene:preview-stop ブロードキャストでツールバーUI状態をリセット
+            Editor.Message.broadcast("scene:preview-stop");
+            // シーンビューに戻す
+            await new Promise(r => setTimeout(r, 500));
+            await this.ensureMainSceneOpen();
+            return ok({ success: true, action: "stop" });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async executeOnToolbar(action: "start" | "stop"): Promise<boolean> {
+        try {
+            const electron = require("electron");
+            const allContents = electron.webContents.getAllWebContents();
+            for (const wc of allContents) {
+                try {
+                    if (action === "start") {
+                        const result = await wc.executeJavaScript(
+                            `(async () => { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
+                        );
+                        if (result) return true;
+                    } else {
+                        const result = await wc.executeJavaScript(
+                            `(async () => { if (window.xxx && window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
+                        );
+                        if (result) return true;
+                    }
+                } catch { /* not the toolbar webContents */ }
+            }
+        } catch { /* electron API not available */ }
+        return false;
+    }
+
+    private async ensureMainSceneOpen(): Promise<void> {
+        const hierarchy = await Editor.Message.request("scene", "execute-scene-script", {
+            name: "cocos-creator-mcp",
+            method: "getSceneHierarchy",
+            args: [false],
+        }).catch(() => null);
+
+        if (!hierarchy?.sceneName || hierarchy.sceneName === "scene-2d") {
+            // プロジェクト設定のStart Sceneを参照
+            let sceneUuid: string | null = null;
+            try {
+                sceneUuid = await (Editor as any).Profile.getConfig("preview", "general.start_scene", "local");
+            } catch { /* ignore */ }
+
+            // Start Sceneが未設定 or "current_scene" の場合、最初のシーンを使う
+            if (!sceneUuid || sceneUuid === "current_scene") {
                 const scenes = await Editor.Message.request("asset-db", "query-assets", {
                     ccType: "cc.SceneAsset",
                     pattern: "db://assets/**/*",
                 });
-                const mainScene = Array.isArray(scenes) ? scenes.find((s: any) =>
-                    s.name?.includes("Main") || s.name?.includes("main")
-                ) || scenes[0] : null;
-                if (mainScene) {
-                    await (Editor.Message.request as any)("scene", "open-scene", mainScene.uuid);
-                    await new Promise(r => setTimeout(r, 1500));
+                if (Array.isArray(scenes) && scenes.length > 0) {
+                    sceneUuid = scenes[0].uuid;
                 }
             }
 
-            // Preview in Editor
-            const isPlaying = await (Editor.Message.request as any)("scene", "editor-preview-set-play", true);
-            return ok({ success: true, isPlaying, mode: "editor" });
-        } catch (e: any) {
-            // フォールバック: ブラウザプレビュー
-            try {
-                const electron = require("electron");
-                await electron.shell.openExternal("http://127.0.0.1:7456");
-                return ok({ success: true, mode: "browser", note: "Editor preview failed, opened browser preview" });
-            } catch (e2: any) {
-                return err(e2.message || String(e2));
+            if (sceneUuid) {
+                await (Editor.Message.request as any)("scene", "open-scene", sceneUuid);
+                await new Promise(r => setTimeout(r, 1500));
             }
         }
     }
