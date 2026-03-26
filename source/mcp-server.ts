@@ -2,6 +2,7 @@ import http from "http";
 import { ToolCategory, ToolDefinition, JsonRpcRequest, JsonRpcResponse, ServerConfig, DEFAULT_CONFIG } from "./types";
 
 const MCP_PROTOCOL_VERSION = "2024-11-05";
+const SESSION_ID = `cocos-mcp-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 
 // ─── Game Preview Log Buffer ───
 
@@ -25,6 +26,46 @@ export function getGameLogs(count: number, level?: string): { logs: GameLogEntry
 
 export function clearGameLogs(): void {
     _gameLogs.length = 0;
+}
+
+// ─── Game Debug Command Queue ───
+
+interface GameCommand {
+    id: string;
+    type: string;
+    args?: any;
+    timestamp: string;
+}
+
+interface GameCommandResult {
+    id: string;
+    success: boolean;
+    data?: any;
+    error?: string;
+    timestamp: string;
+}
+
+let _pendingCommand: GameCommand | null = null;
+let _commandResult: GameCommandResult | null = null;
+let _commandIdCounter = 0;
+
+/** Queue a command for the game to execute */
+export function queueGameCommand(type: string, args?: any): string {
+    const id = `cmd_${++_commandIdCounter}_${Date.now()}`;
+    _pendingCommand = { id, type, args, timestamp: new Date().toISOString() };
+    _commandResult = null;
+    return id;
+}
+
+/** Get the result of the last command (poll until available) */
+export function getCommandResult(): GameCommandResult | null {
+    return _commandResult;
+}
+
+/** Clear command state */
+export function clearCommandState(): void {
+    _pendingCommand = null;
+    _commandResult = null;
 }
 
 export class McpServer {
@@ -118,6 +159,26 @@ export class McpServer {
             return;
         }
 
+        // Game debug command queue — game polls for commands
+        if (url === "/game/command" && req.method === "GET") {
+            const cmd = _pendingCommand;
+            _pendingCommand = null; // consume
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(cmd));
+            return;
+        }
+
+        // Game debug command result — game posts result
+        if (url === "/game/result" && req.method === "POST") {
+            const body = await readBody(req);
+            try {
+                _commandResult = JSON.parse(body);
+            } catch { /* ignore */ }
+            res.writeHead(204);
+            res.end();
+            return;
+        }
+
         // Game preview log receiver
         if (url === "/log" && req.method === "POST") {
             const body = await readBody(req);
@@ -203,12 +264,8 @@ export class McpServer {
 
             case "notifications/initialized":
                 // No response needed for notification
-                if (wantSse) {
-                    this.sendSse(res, []);
-                } else {
-                    res.writeHead(204);
-                    res.end();
-                }
+                res.writeHead(204, { "Mcp-Session-Id": SESSION_ID });
+                res.end();
                 return;
 
             case "tools/list":
@@ -269,7 +326,10 @@ export class McpServer {
     }
 
     private sendJsonRpc(res: http.ServerResponse, data: JsonRpcResponse): void {
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Mcp-Session-Id": SESSION_ID,
+        });
         res.end(JSON.stringify(data));
     }
 
@@ -277,6 +337,7 @@ export class McpServer {
         res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
+            "Mcp-Session-Id": SESSION_ID,
         });
         for (const msg of messages) {
             res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
