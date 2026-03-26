@@ -1,6 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
-import { getGameLogs, clearGameLogs } from "../mcp-server";
+import { getGameLogs, clearGameLogs, queueGameCommand, getCommandResult } from "../mcp-server";
 
 export class DebugTools implements ToolCategory {
     readonly categoryName = "debug";
@@ -103,6 +103,39 @@ export class DebugTools implements ToolCategory {
                 inputSchema: { type: "object", properties: {} },
             },
             {
+                name: "debug_game_command",
+                description: "Send a command to the running game preview. Requires GameDebugClient in the game. Commands: 'screenshot' (capture game canvas), 'state' (dump GameDb), 'navigate' (go to a page), 'click' (click a node by name). Returns the result from the game.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        type: { type: "string", description: "Command type: 'screenshot', 'state', 'navigate', 'click'" },
+                        args: { description: "Command arguments (e.g. {page: 'HomePageView'} for navigate, {name: 'ButtonName'} for click)" },
+                        timeout: { type: "number", description: "Max wait time in ms (default 5000)" },
+                    },
+                    required: ["type"],
+                },
+            },
+            {
+                name: "debug_screenshot",
+                description: "Take a screenshot of the editor window and save to a file. Returns the file path of the saved PNG.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        savePath: { type: "string", description: "File path to save the PNG (default: temp/screenshots/screenshot_<timestamp>.png)" },
+                    },
+                },
+            },
+            {
+                name: "debug_preview",
+                description: "Start or refresh the game preview (equivalent to clicking the Play button in the editor toolbar).",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "debug_clear_code_cache",
+                description: "Clear the code cache (equivalent to Developer > Cache > Clear code cache) and soft-reload the scene.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
                 name: "debug_get_extension_info",
                 description: "Get detailed information about a specific extension.",
                 inputSchema: {
@@ -153,6 +186,14 @@ export class DebugTools implements ToolCategory {
                 case "debug_open_url":
                     await (Editor.Message.request as any)("program", "open-url", args.url);
                     return ok({ success: true, url: args.url });
+                case "debug_game_command":
+                    return this.gameCommand(args.type, args.args, args.timeout || 5000);
+                case "debug_screenshot":
+                    return this.takeScreenshot(args.savePath);
+                case "debug_preview":
+                    return this.startPreview();
+                case "debug_clear_code_cache":
+                    return this.clearCodeCache();
                 case "debug_validate_scene":
                     return this.validateScene();
                 case "debug_get_extension_info":
@@ -308,6 +349,122 @@ export class DebugTools implements ToolCategory {
             if (!fs.existsSync(logPath)) return ok({ success: true, exists: false });
             const stat = fs.statSync(logPath);
             return ok({ success: true, exists: true, path: logPath, size: stat.size, modified: stat.mtime });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async startPreview(): Promise<ToolResult> {
+        try {
+            // Preview in Editor: scene:editor-preview-set-play
+            const isPlaying = await (Editor.Message.request as any)("scene", "editor-preview-set-play", true);
+            return ok({ success: true, isPlaying, mode: "editor" });
+        } catch (e: any) {
+            // フォールバック: ブラウザプレビュー
+            try {
+                const electron = require("electron");
+                await electron.shell.openExternal("http://127.0.0.1:7456");
+                return ok({ success: true, mode: "browser", note: "Editor preview failed, opened browser preview" });
+            } catch (e2: any) {
+                return err(e2.message || String(e2));
+            }
+        }
+    }
+
+    private async clearCodeCache(): Promise<ToolResult> {
+        try {
+            const electron = require("electron");
+            const menu = electron.Menu.getApplicationMenu();
+            if (!menu) return err("Application menu not found");
+
+            const findMenuItem = (items: any[], path: string[]): any => {
+                for (const item of items) {
+                    if (item.label === path[0]) {
+                        if (path.length === 1) return item;
+                        if (item.submenu?.items) return findMenuItem(item.submenu.items, path.slice(1));
+                    }
+                }
+                return null;
+            };
+
+            const cacheItem = findMenuItem(menu.items, ["Developer", "Cache", "Clear code cache"]);
+            if (!cacheItem) return err("Menu item 'Developer > Cache > Clear code cache' not found");
+
+            cacheItem.click();
+            await new Promise(r => setTimeout(r, 1000));
+            return ok({ success: true, note: "Code cache cleared via menu" });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async gameCommand(type: string, args: any, timeout: number): Promise<ToolResult> {
+        const cmdId = queueGameCommand(type, args);
+
+        // Poll for result
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const result = getCommandResult();
+            if (result && result.id === cmdId) {
+                // If screenshot, save to file and return path
+                if (type === "screenshot" && result.success && result.data?.dataUrl) {
+                    try {
+                        const fs = require("fs");
+                        const path = require("path");
+                        const dir = path.join(Editor.Project.tmpDir, "screenshots");
+                        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+                        const filePath = path.join(dir, `game_${timestamp}.png`);
+                        const base64 = result.data.dataUrl.replace(/^data:image\/png;base64,/, "");
+                        fs.writeFileSync(filePath, Buffer.from(base64, "base64"));
+                        return ok({ success: true, path: filePath, ...result.data });
+                    } catch (e: any) {
+                        return ok({ success: true, note: "Screenshot captured but file save failed", error: e.message });
+                    }
+                }
+                return ok(result);
+            }
+            await new Promise(r => setTimeout(r, 200));
+        }
+        return err(`Game did not respond within ${timeout}ms. Is GameDebugClient running in the preview?`);
+    }
+
+    private async takeScreenshot(savePath?: string): Promise<ToolResult> {
+        try {
+            const fs = require("fs");
+            const path = require("path");
+            const electron = require("electron");
+            const windows = electron.BrowserWindow.getAllWindows();
+            if (!windows || windows.length === 0) {
+                return err("No editor window found");
+            }
+            // Find the main (largest) window
+            let win = windows[0];
+            let maxArea = 0;
+            for (const w of windows) {
+                const bounds = w.getBounds();
+                const area = bounds.width * bounds.height;
+                if (area > maxArea) {
+                    maxArea = area;
+                    win = w;
+                }
+            }
+            // Bring to front and wait for render
+            win.show();
+            await new Promise(r => setTimeout(r, 300));
+            const image = await win.webContents.capturePage();
+            const pngBuffer = image.toPNG();
+
+            // Determine save path
+            if (!savePath) {
+                const dir = path.join(Editor.Project.tmpDir, "screenshots");
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+                savePath = path.join(dir, `screenshot_${timestamp}.png`);
+            }
+
+            fs.writeFileSync(savePath, pngBuffer);
+            return ok({ success: true, path: savePath, size: pngBuffer.length });
         } catch (e: any) {
             return err(e.message || String(e));
         }
