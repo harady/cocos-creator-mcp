@@ -10,7 +10,9 @@
     },
     "description": "i18n:cocos-creator-mcp.description",
     "main": "./dist/main.js",
-    "dependencies": {},
+    "dependencies": {
+        "vue": "^3.1.4"
+    },
     "devDependencies": {
         "@cocos/creator-types": "^3.8.6",
         "@types/node": "^18.17.1",
@@ -39,16 +41,24 @@
         ],
         "messages": {
             "open-panel": {
-                "methods": ["openPanel"]
+                "methods": [
+                    "openPanel"
+                ]
             },
             "start-server": {
-                "methods": ["startServer"]
+                "methods": [
+                    "startServer"
+                ]
             },
             "stop-server": {
-                "methods": ["stopServer"]
+                "methods": [
+                    "stopServer"
+                ]
             },
             "get-server-status": {
-                "methods": ["getServerStatus"]
+                "methods": [
+                    "getServerStatus"
+                ]
             }
         },
         "scene": {
