@@ -59,6 +59,11 @@
                 "methods": [
                     "getServerStatus"
                 ]
+            },
+            "update-port": {
+                "methods": [
+                    "updatePort"
+                ]
             }
         },
         "scene": {
