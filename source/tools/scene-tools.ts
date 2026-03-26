@@ -122,12 +122,21 @@ export class SceneTools implements ToolCategory {
     }
 
     private async saveScene(): Promise<ToolResult> {
-        // scene:save-scene — params: [] | [boolean], result: string | undefined
-        // Use send (fire-and-forget) to avoid dialog/response issues
-        Editor.Message.send("scene", "save-scene");
-        // Wait a moment for the save to complete
-        await new Promise(r => setTimeout(r, 500));
-        return ok({ success: true });
+        try {
+            // シーンが既に保存済み（既存ファイルがある）か確認
+            // save-scene に false を渡すと「名前を付けて保存」ダイアログを抑制
+            const result = await (Editor.Message.request as any)("scene", "save-scene", false);
+            return ok({ success: true, result });
+        } catch (e: any) {
+            // requestが失敗する場合はsend（fire-and-forget）にフォールバック
+            try {
+                (Editor.Message as any).send("scene", "save-scene", false);
+                await new Promise(r => setTimeout(r, 500));
+                return ok({ success: true, note: "Used fire-and-forget fallback" });
+            } catch (e2: any) {
+                return err(e2.message || String(e2));
+            }
+        }
     }
 
     private async getSceneList(): Promise<ToolResult> {

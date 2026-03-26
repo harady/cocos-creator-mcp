@@ -147,6 +147,18 @@ export class PrefabTools implements ToolCategory {
 
     private async createPrefab(nodeUuid: string, path: string): Promise<ToolResult> {
         try {
+            // 既存Prefabがある場合は警告を返す（上書きダイアログでタイムアウトするため）
+            try {
+                const existing = await (Editor.Message.request as any)("asset-db", "query-asset-info", path);
+                if (existing) {
+                    return err(
+                        `Prefab already exists at "${path}". Use prefab_update instead to update an existing prefab. ` +
+                        `Workflow: 1) prefab_instantiate to place in scene, 2) modify properties, 3) prefab_update to save.`
+                    );
+                }
+            } catch (_) {
+                // ファイルが存在しない → 新規作成OK
+            }
             const result = await (Editor.Message.request as any)("scene", "create-prefab", nodeUuid, path);
             return ok({ success: true, nodeUuid, path, result });
         } catch (e: any) {
