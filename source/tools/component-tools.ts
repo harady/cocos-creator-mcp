@@ -77,15 +77,17 @@ export class ComponentTools implements ToolCategory {
     }
 
     async execute(toolName: string, args: Record<string, any>): Promise<ToolResult> {
+        // パラメータエイリアス: component → componentType
+        const compType = args.componentType || args.component;
         switch (toolName) {
             case "component_add":
-                return this.addComponent(args.uuid, args.componentType);
+                return this.addComponent(args.uuid, compType);
             case "component_remove":
-                return this.removeComponent(args.uuid, args.componentType);
+                return this.removeComponent(args.uuid, compType);
             case "component_get_components":
                 return this.getComponents(args.uuid);
             case "component_set_property":
-                return this.setProperty(args.uuid, args.componentType, args.property, args.value);
+                return this.setProperty(args.uuid, compType, args.property, args.value);
             case "component_get_info": {
                 try {
                     const dump = await (Editor.Message.request as any)("scene", "query-component", args.componentUuid);
