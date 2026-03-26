@@ -80,6 +80,21 @@ export class DebugTools implements ToolCategory {
                 description: "Get information about the project log file (size, path, last modified).",
                 inputSchema: { type: "object", properties: {} },
             },
+            // ── 以下、既存MCP未対応のEditor API ──
+            {
+                name: "debug_query_devices",
+                description: "List connected devices (for native debugging).",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "debug_open_url",
+                description: "Open a URL in the system browser from the editor.",
+                inputSchema: {
+                    type: "object",
+                    properties: { url: { type: "string", description: "URL to open" } },
+                    required: ["url"],
+                },
+            },
             {
                 name: "debug_validate_scene",
                 description: "Validate the current scene for common issues.",
@@ -121,6 +136,13 @@ export class DebugTools implements ToolCategory {
                     return this.searchProjectLogs(args.pattern);
                 case "debug_get_log_file_info":
                     return this.getLogFileInfo();
+                case "debug_query_devices": {
+                    const devices = await (Editor.Message.request as any)("device", "query").catch(() => []);
+                    return ok({ success: true, devices });
+                }
+                case "debug_open_url":
+                    await (Editor.Message.request as any)("program", "open-url", args.url);
+                    return ok({ success: true, url: args.url });
                 case "debug_validate_scene":
                     return this.validateScene();
                 case "debug_get_extension_info":

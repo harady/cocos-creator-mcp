@@ -223,6 +223,43 @@ export class SceneAdvancedTools implements ToolCategory {
                 description: "Save the current scene to a new file (shows save dialog).",
                 inputSchema: { type: "object", properties: {} },
             },
+            // ── 以下、既存MCP未対応のEditor API ──
+            {
+                name: "scene_set_parent",
+                description: "Reparent node(s) using the official Editor API (alternative to node_move).",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuids: { type: "array", items: { type: "string" }, description: "Node UUID(s) to move" },
+                        parent: { type: "string", description: "New parent node UUID" },
+                        keepWorldTransform: { type: "boolean", description: "Keep world position (default false)" },
+                    },
+                    required: ["uuids", "parent"],
+                },
+            },
+            {
+                name: "scene_query_node",
+                description: "Get a full property dump of a node (all serialized data).",
+                inputSchema: {
+                    type: "object",
+                    properties: { uuid: { type: "string", description: "Node UUID" } },
+                    required: ["uuid"],
+                },
+            },
+            {
+                name: "scene_query_component",
+                description: "Get a full property dump of a component by its UUID.",
+                inputSchema: {
+                    type: "object",
+                    properties: { uuid: { type: "string", description: "Component UUID" } },
+                    required: ["uuid"],
+                },
+            },
+            {
+                name: "scene_query_scene_bounds",
+                description: "Get the bounding rect of the current scene.",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -313,6 +350,25 @@ export class SceneAdvancedTools implements ToolCategory {
                 case "scene_save_as": {
                     const result = await (Editor.Message.request as any)("scene", "save-as-scene");
                     return ok({ success: true, result });
+                }
+                case "scene_set_parent":
+                    await (Editor.Message.request as any)("scene", "set-parent", {
+                        parent: args.parent,
+                        uuids: args.uuids,
+                        keepWorldTransform: args.keepWorldTransform || false,
+                    });
+                    return ok({ success: true });
+                case "scene_query_node": {
+                    const dump = await (Editor.Message.request as any)("scene", "query-node", args.uuid);
+                    return ok({ success: true, node: dump });
+                }
+                case "scene_query_component": {
+                    const dump = await (Editor.Message.request as any)("scene", "query-component", args.uuid);
+                    return ok({ success: true, component: dump });
+                }
+                case "scene_query_scene_bounds": {
+                    const bounds = await (Editor.Message.request as any)("scene", "query-scene-bounds");
+                    return ok({ success: true, bounds });
                 }
                 default:
                     return err(`Unknown tool: ${toolName}`);

@@ -181,6 +181,25 @@ export class AssetTools implements ToolCategory {
                 description: "Check if the asset database is ready.",
                 inputSchema: { type: "object", properties: {} },
             },
+            // ── 以下、既存MCP未対応のEditor API ──
+            {
+                name: "asset_query_users",
+                description: "Find all assets that use/reference a given asset.",
+                inputSchema: {
+                    type: "object",
+                    properties: { uuid: { type: "string", description: "Asset UUID" } },
+                    required: ["uuid"],
+                },
+            },
+            {
+                name: "asset_query_missing",
+                description: "Check if an asset has missing references.",
+                inputSchema: {
+                    type: "object",
+                    properties: { uuid: { type: "string", description: "Asset UUID" } },
+                    required: ["uuid"],
+                },
+            },
         ];
     }
 
@@ -252,6 +271,14 @@ export class AssetTools implements ToolCategory {
                 case "asset_query_ready": {
                     const ready = await (Editor.Message.request as any)("asset-db", "query-ready");
                     return ok({ success: true, ready });
+                }
+                case "asset_query_users": {
+                    const users = await (Editor.Message.request as any)("asset-db", "query-asset-users", args.uuid).catch(() => []);
+                    return ok({ success: true, uuid: args.uuid, users });
+                }
+                case "asset_query_missing": {
+                    const missing = await (Editor.Message.request as any)("asset-db", "query-missing-asset-info", args.uuid).catch(() => null);
+                    return ok({ success: true, uuid: args.uuid, missing, hasMissing: !!missing });
                 }
                 default:
                     return err(`Unknown tool: ${toolName}`);
