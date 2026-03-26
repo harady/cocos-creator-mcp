@@ -47,14 +47,15 @@ function skip(label) {
     skipped++;
 }
 
-// ── ALL 84 tool names ──
+// ── ALL 120 tool names ──
 const ALL_TOOLS = [
     "asset_copy", "asset_create", "asset_delete", "asset_get_dependencies",
     "asset_get_details", "asset_move", "asset_open_external", "asset_query_path",
     "asset_query_url", "asset_query_uuid", "asset_reimport", "asset_save",
     "builder_get_settings", "builder_open_panel", "builder_query_tasks",
     "builder_run_preview", "builder_stop_preview",
-    "component_add", "component_get_components", "component_remove", "component_set_property",
+    "component_add", "component_get_available", "component_get_components",
+    "component_get_info", "component_remove", "component_set_property",
     "debug_clear_console", "debug_execute_script", "debug_get_console_logs",
     "debug_get_editor_info", "debug_get_extension_info", "debug_list_extensions", "debug_list_messages",
     "node_create", "node_delete", "node_duplicate", "node_find_by_name", "node_get_all",
@@ -63,17 +64,29 @@ const ALL_TOOLS = [
     "prefab_create", "prefab_get_info", "prefab_instantiate", "prefab_list",
     "prefab_revert", "prefab_update",
     "preferences_get", "preferences_get_all", "preferences_reset", "preferences_set",
-    "project_find_asset", "project_get_asset_info", "project_get_info", "project_refresh_assets",
-    "scene_copy_node", "scene_create", "scene_execute_script", "scene_get_hierarchy",
-    "scene_get_list", "scene_open", "scene_paste_node", "scene_query_classes",
-    "scene_query_components", "scene_query_dirty", "scene_query_node_tree",
-    "scene_query_nodes_by_asset", "scene_reset_node_transform", "scene_save",
-    "scene_snapshot", "scene_soft_reload",
+    "project_find_asset", "project_get_asset_info", "project_get_engine_info",
+    "project_get_info", "project_get_settings", "project_query_scripts",
+    "project_refresh_assets", "project_set_settings",
+    "refimage_add", "refimage_clear_all", "refimage_list", "refimage_query_config",
+    "refimage_query_current", "refimage_refresh", "refimage_remove",
+    "refimage_set_opacity", "refimage_set_position", "refimage_set_scale", "refimage_switch",
+    "scene_close", "scene_copy_node", "scene_create", "scene_cut_node",
+    "scene_execute_component_method", "scene_execute_script", "scene_get_current",
+    "scene_get_hierarchy", "scene_get_list", "scene_move_array_element",
+    "scene_open", "scene_paste_node", "scene_query_classes",
+    "scene_query_component_has_script", "scene_query_components", "scene_query_dirty",
+    "scene_query_node_tree", "scene_query_nodes_by_asset", "scene_query_ready",
+    "scene_remove_array_element", "scene_reset_component", "scene_reset_node_transform",
+    "scene_reset_property", "scene_restore_prefab", "scene_save",
+    "scene_snapshot", "scene_snapshot_abort", "scene_soft_reload",
     "server_get_status", "server_query_ip_list", "server_query_port",
+    "view_align_view_with_node", "view_align_with_view",
     "view_change_gizmo_coordinate", "view_change_gizmo_pivot", "view_change_gizmo_tool",
     "view_change_mode_2d_3d", "view_focus_on_node", "view_get_status",
     "view_query_gizmo_coordinate", "view_query_gizmo_pivot", "view_query_gizmo_tool",
-    "view_query_grid_visible", "view_query_mode_2d_3d", "view_set_grid_visible",
+    "view_query_grid_visible", "view_query_icon_gizmo_3d", "view_query_icon_gizmo_size",
+    "view_query_mode_2d_3d", "view_reset",
+    "view_set_grid_visible", "view_set_icon_gizmo_3d", "view_set_icon_gizmo_size",
 ];
 
 // ── tests ──
@@ -83,7 +96,7 @@ async function testHealth() {
     const res = await fetch(`${BASE}/health`);
     const data = await res.json();
     assert(data.status === "ok", "health status ok");
-    assert(data.tools >= 84, `tool count >= 84 (got ${data.tools})`);
+    assert(data.tools >= 120, `tool count >= 120 (got ${data.tools})`);
 }
 
 async function testInitialize() {
@@ -98,7 +111,7 @@ async function testToolsList() {
     console.log("\n── tools/list ──");
     const res = await callMcp("tools/list", {});
     const tools = res.result?.tools || [];
-    assert(tools.length >= 84, `tool count >= 84 (got ${tools.length})`);
+    assert(tools.length >= 120, `tool count >= 120 (got ${tools.length})`);
 
     const names = tools.map((t) => t.name);
     for (const name of ALL_TOOLS) {
@@ -343,6 +356,54 @@ async function testBuilderTools() {
     assert(tasks.success === true || !tasks._rpcError, "query_tasks");
 }
 
+async function testNewSceneAdvancedTools() {
+    console.log("\n── new scene advanced tools ──");
+    const ready = await callTool("scene_query_ready");
+    assert(ready.success === true || !ready._rpcError, "query_ready");
+
+    const current = await callTool("scene_get_current");
+    assert(current.success === true || !current._rpcError, "get_current");
+
+    const hasScript = await callTool("scene_query_component_has_script", { name: "cc.Label" });
+    assert(hasScript.success === true || !hasScript._rpcError, "query_component_has_script");
+}
+
+async function testNewViewTools() {
+    console.log("\n── new scene view tools ──");
+    const icon3d = await callTool("view_query_icon_gizmo_3d");
+    assert(icon3d.success === true || !icon3d._rpcError, "query_icon_gizmo_3d");
+
+    const iconSize = await callTool("view_query_icon_gizmo_size");
+    assert(iconSize.success === true || !iconSize._rpcError, "query_icon_gizmo_size");
+}
+
+async function testComponentAdvanced() {
+    console.log("\n── component advanced tools ──");
+    const available = await callTool("component_get_available");
+    assert(available.success === true || !available._rpcError, "get_available");
+}
+
+async function testProjectAdvanced() {
+    console.log("\n── project advanced tools ──");
+    const engine = await callTool("project_get_engine_info");
+    assert(engine.success === true || !engine._rpcError, "get_engine_info");
+
+    const settings = await callTool("project_get_settings", { protocol: "general" });
+    assert(settings.success === true || !settings._rpcError, "get_settings");
+}
+
+async function testReferenceImageTools() {
+    console.log("\n── reference image tools ──");
+    const config = await callTool("refimage_query_config");
+    assert(config.success === true || !config._rpcError, "query_config");
+
+    const list = await callTool("refimage_list");
+    assert(list.success === true || !list._rpcError, "list");
+
+    const current = await callTool("refimage_query_current");
+    assert(current.success === true || !current._rpcError, "query_current");
+}
+
 // ── runner ──
 
 async function main() {
@@ -371,6 +432,11 @@ async function main() {
     await testPreferencesTools();
     await testServerTools();
     await testBuilderTools();
+    await testNewSceneAdvancedTools();
+    await testNewViewTools();
+    await testComponentAdvanced();
+    await testProjectAdvanced();
+    await testReferenceImageTools();
 
     console.log(`\n${"═".repeat(40)}`);
     console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);
