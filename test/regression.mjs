@@ -108,10 +108,18 @@ async function testHealth() {
 
 async function testInitialize() {
     console.log("\n── MCP Initialize ──");
-    const res = await callMcp("initialize", {});
-    assert(res.result?.protocolVersion, `protocol version: ${res.result?.protocolVersion}`);
-    assert(res.result?.serverInfo?.name === "cocos-creator-mcp", "server name");
-    assert(res.result?.serverInfo?.version === "1.0.0", `version: ${res.result?.serverInfo?.version}`);
+    const res = await fetch(`${BASE}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method: "initialize", params: {} }),
+    });
+    const data = await res.json();
+    assert(data.result?.protocolVersion, `protocol version: ${data.result?.protocolVersion}`);
+    assert(data.result?.serverInfo?.name === "cocos-creator-mcp", "server name");
+    assert(data.result?.serverInfo?.version === "1.0.0", `version: ${data.result?.serverInfo?.version}`);
+    // Mcp-Session-Id ヘッダーが返されるか
+    const sessionId = res.headers.get("Mcp-Session-Id");
+    assert(!!sessionId, `Mcp-Session-Id header: ${sessionId}`);
 }
 
 async function testToolsList() {
@@ -225,10 +233,9 @@ async function testPrefabTools() {
     const uuid = created.uuid;
     await callTool("component_set_property", { uuid, componentType: "cc.Label", property: "string", value: "v1prefab" });
 
-    // Delete existing test prefab first to avoid overwrite dialog
-    await callTool("asset_delete", { path: "db://assets/test/V1Test.prefab" }).catch(() => {});
-    await new Promise(r => setTimeout(r, 500));
-    const prefab = await callTool("prefab_create", { uuid, path: "db://assets/test/V1Test.prefab" });
+    // テスト用Prefabパスを毎回ユニークにしてoverwriteを避ける
+    const testPrefabPath = `db://assets/test/V1Test_${Date.now()}.prefab`;
+    const prefab = await callTool("prefab_create", { uuid, path: testPrefabPath });
     assert(prefab.success === true, "create");
 
     if (prefab.result) {
@@ -349,6 +356,7 @@ async function testServerTools() {
     console.log("\n── server tools ──");
     const status = await callTool("server_get_status");
     assert(status.success === true, "get_status");
+    assert(!!status.buildId && status.buildId !== "__BUILD_ID__", `buildId: ${status.buildId}`);
 
     const port = await callTool("server_query_port");
     assert(port.success === true, "query_port");
@@ -409,6 +417,64 @@ async function testReferenceImageTools() {
 
     const current = await callTool("refimage_query_current");
     assert(current.success === true || !current._rpcError, "query_current");
+}
+
+async function testV13Regressions() {
+    console.log("\n── v1.3 regressions (set-property / prefab guard / scene_save) ──");
+
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+
+    // 1. scene_save — ダイアログなしで成功するか
+    const save = await callTool("scene_save");
+    assert(save.success === true, "scene_save no dialog");
+
+    // 2. prefab_create 上書きガード — 既存Prefabに対してエラーを返すか
+    // UnitIcon.prefab が存在するはずなのでそれを使う
+    const guardResult = await callTool("prefab_create", {
+        uuid: "dummy",
+        path: "db://assets/game/views/CommonParts/UnitIcon.prefab"
+    });
+    assert(!!guardResult.error || !!guardResult._rpcError, "prefab_create overwrite guard");
+
+    // 3. set-property + prefab_update — 既存Prefabインスタンスでテスト
+    const existingPrefabs = await callTool("prefab_list");
+    const unitIconPrefab = existingPrefabs.prefabs?.find(p => p.name === "UnitIcon.prefab");
+    if (unitIconPrefab) {
+        const inst = await callTool("prefab_instantiate", { prefabUuid: unitIconPrefab.uuid, parent: canvasUuid });
+        const instUuid = inst.nodeUuid;
+
+        // LevelLabel子ノードを探す
+        const labelNode = await callTool("node_find_by_name", { name: "LevelLabel" });
+        const labelInInst = labelNode.data?.find(n => n.parent === instUuid);
+
+        if (labelInInst) {
+            // set-propertyでfontSize変更
+            const setProp = await callTool("component_set_property", {
+                uuid: labelInInst.uuid, componentType: "cc.Label", property: "fontSize", value: 48
+            });
+            assert(setProp.success === true, "set-property fontSize via scene:set-property");
+
+            // prefab_updateで保存
+            const updated = await callTool("prefab_update", { uuid: instUuid });
+            assert(updated.success === true, "prefab_update after set-property");
+        } else {
+            skip("set-property test (LevelLabel not found in instance)");
+        }
+
+        // クリーンアップ
+        await callTool("node_delete", { uuid: instUuid });
+    } else {
+        skip("set-property + prefab_update (UnitIcon.prefab not found)");
+    }
+
+    // 4. パラメータエイリアス — component でも componentType でも動くか
+    const aliasNode = await callTool("node_create", { name: "AliasTest", parent: canvasUuid, components: ["cc.Label"] });
+    const aliasSet = await callTool("component_set_property", {
+        uuid: aliasNode.uuid, component: "cc.Label", property: "string", value: "alias"
+    });
+    assert(aliasSet.success === true, "param alias: component → componentType");
+    await callTool("node_delete", { uuid: aliasNode.uuid });
 }
 
 async function testNewEditorAPIs() {
@@ -494,6 +560,7 @@ async function main() {
     await testComponentAdvanced();
     await testProjectAdvanced();
     await testReferenceImageTools();
+    await testV13Regressions();
     await testNewEditorAPIs();
 
     console.log(`\n${"═".repeat(40)}`);

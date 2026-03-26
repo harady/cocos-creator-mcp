@@ -123,8 +123,11 @@ export class SceneTools implements ToolCategory {
 
     private async saveScene(): Promise<ToolResult> {
         try {
-            // シーンが既に保存済み（既存ファイルがある）か確認
-            // save-scene に false を渡すと「名前を付けて保存」ダイアログを抑制
+            // シーンがdirtyでない場合は保存不要
+            const isDirty = await (Editor.Message.request as any)("scene", "query-is-dirty").catch(() => true);
+            if (!isDirty) {
+                return ok({ success: true, note: "Scene not dirty, skip save" });
+            }
             const result = await (Editor.Message.request as any)("scene", "save-scene", false);
             return ok({ success: true, result });
         } catch (e: any) {

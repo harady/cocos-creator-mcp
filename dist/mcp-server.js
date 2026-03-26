@@ -14,7 +14,7 @@ const types_1 = require("./types");
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const SESSION_ID = `cocos-mcp-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 /** ビルド時に書き換えられるID。npm run build で自動更新 */
-exports.BUILD_ID = "20260326201355";
+exports.BUILD_ID = "20260326202131";
 const MAX_GAME_LOG_BUFFER = 500;
 const _gameLogs = [];
 /** Access game preview log buffer from debug-tools */
