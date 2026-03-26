@@ -6,13 +6,13 @@ AI assistants like Claude can control Cocos Creator editor through this extensio
 
 ## Features
 
-- **84 Tools** across 12 categories — comprehensive editor automation
+- **145 Tools** across 13 categories — comprehensive editor automation
 - **Streamable HTTP (SSE)** — Native support for MCP's Streamable HTTP transport
 - **JSON-RPC 2.0** — Standard MCP protocol compliance
 - **Prefab Property Persistence** — Component properties are correctly preserved when saving prefabs
 - **Auto Start** — Server starts automatically when the extension loads
 - **i18n** — English, Japanese, Chinese
-- **Regression Tests** — 142 assertions covering all tools
+- **Regression Tests** — 224 assertions covering all 145 tools
 
 ## Quick Start
 
@@ -66,7 +66,7 @@ curl http://127.0.0.1:3001/health
 # {"status":"ok","tools":84}
 ```
 
-## Available Tools (84)
+## Available Tools (145)
 
 ### Scene (4)
 | Tool | Description |
@@ -217,6 +217,12 @@ Settings are stored in `{project}/settings/cocos-creator-mcp.json`:
 node test/regression.mjs        # default port 3001
 node test/regression.mjs 3000   # custom port
 ```
+
+## Version History
+
+- **v0.1** — MCP server + scene/node tools (13 tools)
+- **v0.5** — Component, prefab, project, debug tools (27 tools)
+- **v1.0** — Full tool coverage (145 tools, 13 categories, 224 test assertions)
 
 ## Development
 
