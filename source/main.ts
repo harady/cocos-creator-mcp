@@ -5,6 +5,13 @@ import { ComponentTools } from "./tools/component-tools";
 import { PrefabTools } from "./tools/prefab-tools";
 import { ProjectTools } from "./tools/project-tools";
 import { DebugTools } from "./tools/debug-tools";
+import { SceneAdvancedTools } from "./tools/scene-advanced-tools";
+import { SceneViewTools } from "./tools/scene-view-tools";
+import { AssetTools } from "./tools/asset-tools";
+import { PreferencesTools } from "./tools/preferences-tools";
+import { ServerTools } from "./tools/server-tools";
+import { BuilderTools } from "./tools/builder-tools";
+import { ReferenceImageTools } from "./tools/reference-image-tools";
 import { ServerConfig, DEFAULT_CONFIG } from "./types";
 import path from "path";
 import fs from "fs";
@@ -47,6 +54,13 @@ function createServer(config: ServerConfig): McpServer {
     s.register(new PrefabTools());
     s.register(new ProjectTools());
     s.register(new DebugTools());
+    s.register(new SceneAdvancedTools());
+    s.register(new SceneViewTools());
+    s.register(new AssetTools());
+    s.register(new PreferencesTools());
+    s.register(new ServerTools());
+    s.register(new BuilderTools());
+    s.register(new ReferenceImageTools());
     return s;
 }
 
@@ -76,6 +90,7 @@ export const methods: Record<string, (...args: any[]) => any> = {
             running: server?.isRunning ?? false,
             port: server?.port ?? loadConfig().port,
             toolCount: server?.getAllTools().length ?? 0,
+            toolNames: server?.getAllTools().map((t) => t.name).sort() ?? [],
         };
     },
 };

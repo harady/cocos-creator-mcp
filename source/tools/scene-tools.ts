@@ -51,6 +51,16 @@ export class SceneTools implements ToolCategory {
                     properties: {},
                 },
             },
+            {
+                name: "scene_close",
+                description: "Close the current scene.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "scene_get_current",
+                description: "Get the name and UUID of the currently open scene.",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -64,6 +74,16 @@ export class SceneTools implements ToolCategory {
                 return this.saveScene();
             case "scene_get_list":
                 return this.getSceneList();
+            case "scene_close":
+                try {
+                    await (Editor.Message.request as any)("scene", "close-scene");
+                    return ok({ success: true });
+                } catch (e: any) { return err(e.message || String(e)); }
+            case "scene_get_current":
+                return this.getHierarchy(false).then((r) => {
+                    const parsed = JSON.parse(r.content[0].text);
+                    return ok({ success: true, sceneName: parsed.sceneName, sceneUuid: parsed.sceneUuid });
+                }).catch((e) => err(String(e)));
             default:
                 return err(`Unknown tool: ${toolName}`);
         }

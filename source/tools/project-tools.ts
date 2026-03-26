@@ -44,6 +44,39 @@ export class ProjectTools implements ToolCategory {
                     required: ["pattern"],
                 },
             },
+            {
+                name: "project_get_settings",
+                description: "Get project settings for a given protocol.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        protocol: { type: "string", description: "Settings protocol (e.g. 'general', 'engine')" },
+                    },
+                },
+            },
+            {
+                name: "project_set_settings",
+                description: "Set a project setting.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        protocol: { type: "string" },
+                        key: { type: "string" },
+                        value: {},
+                    },
+                    required: ["protocol", "key", "value"],
+                },
+            },
+            {
+                name: "project_get_engine_info",
+                description: "Get engine version and path information.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "project_query_scripts",
+                description: "Query all script plugins in the project.",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -57,6 +90,30 @@ export class ProjectTools implements ToolCategory {
                 return this.getAssetInfo(args.uuid);
             case "project_find_asset":
                 return this.findAsset(args.pattern);
+            case "project_get_settings": {
+                try {
+                    const config = await (Editor.Message.request as any)("project", "query-config", args.protocol || "general");
+                    return ok({ success: true, config });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
+            case "project_set_settings": {
+                try {
+                    await (Editor.Message.request as any)("project", "set-config", args.protocol, args.key, args.value);
+                    return ok({ success: true });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
+            case "project_get_engine_info": {
+                try {
+                    const info = await (Editor.Message.request as any)("engine", "query-info");
+                    return ok({ success: true, info });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
+            case "project_query_scripts": {
+                try {
+                    const scripts = await (Editor.Message.request as any)("programming", "query-sorted-plugins");
+                    return ok({ success: true, scripts });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
             default:
                 return err(`Unknown tool: ${toolName}`);
         }

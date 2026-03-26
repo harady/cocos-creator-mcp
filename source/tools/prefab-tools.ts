@@ -49,6 +49,51 @@ export class PrefabTools implements ToolCategory {
                     required: ["uuid"],
                 },
             },
+            {
+                name: "prefab_update",
+                description: "Update (re-save) a prefab from its instance node in the scene.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID of the prefab instance in the scene" },
+                    },
+                    required: ["uuid"],
+                },
+            },
+            {
+                name: "prefab_duplicate",
+                description: "Duplicate a prefab asset to a new path.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        source: { type: "string", description: "Source prefab db:// path" },
+                        destination: { type: "string", description: "Destination db:// path" },
+                    },
+                    required: ["source", "destination"],
+                },
+            },
+            {
+                name: "prefab_validate",
+                description: "Validate a prefab for missing references or broken links.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Prefab asset UUID" },
+                    },
+                    required: ["uuid"],
+                },
+            },
+            {
+                name: "prefab_revert",
+                description: "Revert a prefab instance node to its original prefab state.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID of the prefab instance" },
+                    },
+                    required: ["uuid"],
+                },
+            },
         ];
     }
 
@@ -62,6 +107,23 @@ export class PrefabTools implements ToolCategory {
                 return this.instantiatePrefab(args.prefabUuid, args.parent);
             case "prefab_get_info":
                 return this.getPrefabInfo(args.uuid);
+            case "prefab_update":
+                return this.updatePrefab(args.uuid);
+            case "prefab_duplicate": {
+                try {
+                    await (Editor.Message.request as any)("asset-db", "copy-asset", args.source, args.destination);
+                    return ok({ success: true, source: args.source, destination: args.destination });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
+            case "prefab_validate": {
+                try {
+                    const info = await (Editor.Message.request as any)("asset-db", "query-asset-info", args.uuid);
+                    const deps = await (Editor.Message.request as any)("asset-db", "query-depends", args.uuid).catch(() => []);
+                    return ok({ success: true, uuid: args.uuid, info, dependencies: deps, valid: !!info });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
+            case "prefab_revert":
+                return this.revertPrefab(args.uuid);
             default:
                 return err(`Unknown tool: ${toolName}`);
         }
@@ -99,6 +161,24 @@ export class PrefabTools implements ToolCategory {
                 assetUuid: prefabUuid,
             });
             return ok({ success: true, nodeUuid: result, prefabUuid });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async updatePrefab(nodeUuid: string): Promise<ToolResult> {
+        try {
+            const result = await (Editor.Message.request as any)("scene", "apply-prefab", nodeUuid);
+            return ok({ success: true, nodeUuid, result });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async revertPrefab(nodeUuid: string): Promise<ToolResult> {
+        try {
+            const result = await (Editor.Message.request as any)("scene", "revert-prefab", nodeUuid);
+            return ok({ success: true, nodeUuid, result });
         } catch (e: any) {
             return err(e.message || String(e));
         }

@@ -57,6 +57,22 @@ export class ComponentTools implements ToolCategory {
                     required: ["uuid", "componentType", "property", "value"],
                 },
             },
+            {
+                name: "component_get_info",
+                description: "Get detailed dump of a specific component by its UUID.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        componentUuid: { type: "string", description: "Component UUID (not node UUID)" },
+                    },
+                    required: ["componentUuid"],
+                },
+            },
+            {
+                name: "component_get_available",
+                description: "List all available component classes that can be added to nodes.",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -70,6 +86,18 @@ export class ComponentTools implements ToolCategory {
                 return this.getComponents(args.uuid);
             case "component_set_property":
                 return this.setProperty(args.uuid, args.componentType, args.property, args.value);
+            case "component_get_info": {
+                try {
+                    const dump = await (Editor.Message.request as any)("scene", "query-component", args.componentUuid);
+                    return ok({ success: true, component: dump });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
+            case "component_get_available": {
+                try {
+                    const classes = await (Editor.Message.request as any)("scene", "query-classes");
+                    return ok({ success: true, classes });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
             default:
                 return err(`Unknown tool: ${toolName}`);
         }

@@ -128,6 +128,41 @@ export class NodeTools implements ToolCategory {
                     properties: {},
                 },
             },
+            {
+                name: "node_set_active",
+                description: "Set a node's active (visible) state.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID" },
+                        active: { type: "boolean", description: "Whether the node is active" },
+                    },
+                    required: ["uuid", "active"],
+                },
+            },
+            {
+                name: "node_set_layer",
+                description: "Set a node's layer.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID" },
+                        layer: { type: "number", description: "Layer value" },
+                    },
+                    required: ["uuid", "layer"],
+                },
+            },
+            {
+                name: "node_detect_type",
+                description: "Detect node type (2D, 3D, or regular Node) based on its components.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID" },
+                    },
+                    required: ["uuid"],
+                },
+            },
         ];
     }
 
@@ -151,6 +186,22 @@ export class NodeTools implements ToolCategory {
                 return this.duplicateNode(args.uuid);
             case "node_get_all":
                 return this.getAllNodes();
+            case "node_set_active":
+                return this.setProperty(args.uuid, "active", args.active);
+            case "node_set_layer":
+                return this.setProperty(args.uuid, "layer", args.layer);
+            case "node_detect_type": {
+                try {
+                    const info = await this.sceneScript("getNodeInfo", [args.uuid]);
+                    if (!info.success) return ok(info);
+                    const comps = info.data?.components || [];
+                    const compTypes = comps.map((c: any) => c.type);
+                    let nodeType = "Node";
+                    if (compTypes.includes("UITransform")) nodeType = "2D";
+                    else if (compTypes.includes("MeshRenderer") || compTypes.includes("Camera")) nodeType = "3D";
+                    return ok({ success: true, uuid: args.uuid, nodeType, components: compTypes });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
             default:
                 return err(`Unknown tool: ${toolName}`);
         }
