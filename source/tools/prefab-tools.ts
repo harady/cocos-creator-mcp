@@ -148,21 +148,33 @@ export class PrefabTools implements ToolCategory {
     private async createPrefab(nodeUuid: string, path: string): Promise<ToolResult> {
         try {
             // 既存Prefabがある場合は警告を返す（上書きダイアログでタイムアウトするため）
-            try {
-                const existing = await (Editor.Message.request as any)("asset-db", "query-asset-info", path);
-                if (existing) {
-                    return err(
-                        `Prefab already exists at "${path}". Use prefab_update instead to update an existing prefab. ` +
-                        `Workflow: 1) prefab_instantiate to place in scene, 2) modify properties, 3) prefab_update to save.`
-                    );
-                }
-            } catch (_) {
-                // ファイルが存在しない → 新規作成OK
+            const existing = await this.assetExists(path);
+            if (existing) {
+                return err(
+                    `Prefab already exists at "${path}". Use prefab_update instead to update an existing prefab. ` +
+                    `Workflow: 1) prefab_instantiate to place in scene, 2) modify properties, 3) prefab_update to save.`
+                );
             }
             const result = await (Editor.Message.request as any)("scene", "create-prefab", nodeUuid, path);
             return ok({ success: true, nodeUuid, path, result });
         } catch (e: any) {
             return err(e.message || String(e));
+        }
+    }
+
+    private async assetExists(path: string): Promise<boolean> {
+        try {
+            // db://パスからファイル名を抽出してquery-assetsで検索
+            const results = await Editor.Message.request("asset-db", "query-assets", { pattern: path.replace(/\.prefab$/, "") + ".*" });
+            return (results || []).length > 0;
+        } catch {
+            // query-assetsも失敗する場合はquery-asset-infoでフォールバック
+            try {
+                const info = await (Editor.Message.request as any)("asset-db", "query-asset-info", path);
+                return !!info;
+            } catch {
+                return false;
+            }
         }
     }
 
