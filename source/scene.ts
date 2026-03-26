@@ -271,6 +271,20 @@ export const methods: Record<string, (...args: any[]) => any> = {
         return { success: true };
     },
 
+    async setPropertyViaEditor(nodeUuid: string, path: string, dump: any) {
+        try {
+            // scene:set-property API
+            // uuid: ノードUUID（コンポーネントUUIDではない）
+            // path: __comps__.{index}.{property} 形式
+            // dump: { value, type } 形式
+            const opts = { uuid: nodeUuid, path, dump };
+            const result = await (Editor as any).Message.request("scene", "set-property", opts);
+            return { success: true, result };
+        } catch (e: any) {
+            return { success: false, error: e.message || String(e) };
+        }
+    },
+
     removeComponentFromNode(uuid: string, componentType: string) {
         try {
             const { js } = require("cc");

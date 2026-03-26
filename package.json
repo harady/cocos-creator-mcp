@@ -1,11 +1,11 @@
 {
     "package_version": 2,
     "name": "cocos-creator-mcp",
-    "version": "1.2.1",
+    "version": "1.3.0",
     "author": "harady",
     "editor": ">=3.8.0",
     "scripts": {
-        "build": "tsc",
+        "build": "tsc && node -e \"const fs=require('fs');const f='dist/mcp-server.js';const id=new Date().toISOString().replace(/[^0-9]/g,'').substring(0,14);fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace('__BUILD_ID__',id));console.log('BUILD_ID:',id)\"",
         "watch": "tsc -w"
     },
     "description": "i18n:cocos-creator-mcp.description",

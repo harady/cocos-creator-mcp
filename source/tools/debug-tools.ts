@@ -192,7 +192,7 @@ export class DebugTools implements ToolCategory {
                     await (Editor.Message.request as any)("program", "open-url", args.url);
                     return ok({ success: true, url: args.url });
                 case "debug_game_command":
-                    return this.gameCommand(args.type, args.args, args.timeout || 5000);
+                    return this.gameCommand(args.type || args.command, args.args, args.timeout || 5000);
                 case "debug_screenshot":
                     return this.takeScreenshot(args.savePath);
                 case "debug_preview":

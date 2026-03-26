@@ -122,12 +122,35 @@ export class SceneTools implements ToolCategory {
     }
 
     private async saveScene(): Promise<ToolResult> {
-        // scene:save-scene — params: [] | [boolean], result: string | undefined
-        // Use send (fire-and-forget) to avoid dialog/response issues
-        Editor.Message.send("scene", "save-scene");
-        // Wait a moment for the save to complete
-        await new Promise(r => setTimeout(r, 500));
-        return ok({ success: true });
+        try {
+            // 現在のシーンが保存済みファイルか確認（新規シーンの場合はダイアログが出るのでスキップ）
+            const scenes = await Editor.Message.request("asset-db", "query-assets", {
+                pattern: "db://assets/**/*.scene",
+            }).catch(() => []);
+
+            // シーン名を取得して既存シーンか判定
+            const hierarchy = await Editor.Message.request(
+                "scene", "execute-scene-script",
+                { name: "cocos-creator-mcp", method: "getSceneHierarchy", args: [false] }
+            ).catch(() => null);
+
+            const sceneName = hierarchy?.sceneName;
+            const isNewScene = !sceneName || sceneName === "scene-2d" || sceneName === "Untitled";
+            if (isNewScene) {
+                return ok({ success: true, note: "New/untitled scene, skip save to avoid dialog" });
+            }
+
+            // シーンがdirtyでない場合は保存不要
+            const isDirty = await (Editor.Message.request as any)("scene", "query-is-dirty").catch(() => true);
+            if (!isDirty) {
+                return ok({ success: true, note: "Scene not dirty, skip save" });
+            }
+
+            const result = await (Editor.Message.request as any)("scene", "save-scene", false);
+            return ok({ success: true, result });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
     }
 
     private async getSceneList(): Promise<ToolResult> {
