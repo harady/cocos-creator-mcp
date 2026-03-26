@@ -6,10 +6,14 @@ AI assistants like Claude can control Cocos Creator editor through this extensio
 
 ## Features
 
-- **145 Tools** across 13 categories — comprehensive editor automation
+- **149 Tools** across 13 categories — comprehensive editor automation
 - **Streamable HTTP (SSE)** — Native support for MCP's Streamable HTTP transport
 - **JSON-RPC 2.0** — Standard MCP protocol compliance
 - **Prefab Property Persistence** — Component properties are correctly preserved when saving prefabs
+- **Preview in Editor** — Start editor preview programmatically (no manual button click needed)
+- **Screenshot Capture** — Capture editor window and game preview screenshots
+- **Game Command Control** — Send commands to running game preview (screenshot, click, navigate, state)
+- **Client Scripts** — Drop-in TypeScript files for game preview integration (`client/`)
 - **Auto Start** — Server starts automatically when the extension loads
 - **Tool Call Logging** — All tool invocations logged with timing for debugging
 - **UUID Validation** — Input validation helpers for better error messages
@@ -245,7 +249,7 @@ curl http://127.0.0.1:3000/health
 </details>
 
 <details>
-<summary><strong>Debug (13)</strong> — Editor info, logs, extensions, validation</summary>
+<summary><strong>Debug (17)</strong> — Editor info, logs, preview, screenshots, game control</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -254,6 +258,10 @@ curl http://127.0.0.1:3000/health
 | `debug_execute_script` | Execute scene script method |
 | `debug_get_console_logs` | Get console log entries (scene + game preview) |
 | `debug_clear_console` | Clear editor console and log buffers |
+| `debug_preview` | Start Preview in Editor (play button) |
+| `debug_clear_code_cache` | Clear code cache (Developer > Cache) |
+| `debug_screenshot` | Capture editor window screenshot |
+| `debug_game_command` | Send command to game preview (screenshot/click/navigate/state) |
 | `debug_list_extensions` | List installed extensions |
 | `debug_get_extension_info` | Get extension details |
 | `debug_get_project_logs` | Read project log entries |
@@ -437,6 +445,7 @@ node test/regression.mjs 3001    # custom port
 - **v0.5** — Component, prefab, project, debug tools (27 tools)
 - **v1.0** — Full tool coverage (145 tools, 13 categories, 224 test assertions)
 - **v1.1** — Console log capture (scene process auto-capture + game preview via `/log` endpoint)
+- **v1.2** — AI autonomous development: Preview in Editor, screenshot capture, game command control, code cache clear, scene save fix. Client scripts for game preview integration (`client/`)
 
 ## Development
 
