@@ -85,6 +85,19 @@ export const methods: Record<string, (...args: any[]) => any> = {
         return { running: false };
     },
 
+    async updatePort(_port: number) {
+        const config = loadConfig();
+        config.port = _port;
+        saveConfig(config);
+        // Restart server if running
+        if (server?.isRunning) {
+            await server.stop();
+            server = createServer(config);
+            await server.start();
+        }
+        return { port: _port, running: server?.isRunning ?? false };
+    },
+
     getServerStatus() {
         return {
             running: server?.isRunning ?? false,
