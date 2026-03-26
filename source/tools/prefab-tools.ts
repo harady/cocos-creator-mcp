@@ -147,17 +147,6 @@ export class PrefabTools implements ToolCategory {
 
     private async createPrefab(nodeUuid: string, path: string): Promise<ToolResult> {
         try {
-            // 既存ファイルがある場合は先に削除（上書き確認ダイアログ回避）
-            try {
-                const existing = await (Editor.Message.request as any)("asset-db", "query-asset-info", path);
-                if (existing) {
-                    await (Editor.Message.request as any)("asset-db", "delete-asset", path);
-                    // 削除が反映されるまで少し待つ
-                    await new Promise(r => setTimeout(r, 500));
-                }
-            } catch (_) {
-                // ファイルが存在しない場合は無視
-            }
             const result = await (Editor.Message.request as any)("scene", "create-prefab", nodeUuid, path);
             return ok({ success: true, nodeUuid, path, result });
         } catch (e: any) {
