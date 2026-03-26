@@ -203,6 +203,26 @@ export class SceneAdvancedTools implements ToolCategory {
                     required: ["uuid"],
                 },
             },
+            {
+                name: "scene_begin_undo",
+                description: "Begin recording undo operations.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "scene_end_undo",
+                description: "End undo recording and save the undo step.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "scene_cancel_undo",
+                description: "Cancel the current undo recording.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "scene_save_as",
+                description: "Save the current scene to a new file (shows save dialog).",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -281,6 +301,19 @@ export class SceneAdvancedTools implements ToolCategory {
                 case "scene_restore_prefab":
                     await (Editor.Message.request as any)("scene", "restore-prefab", { uuid: args.uuid });
                     return ok({ success: true, uuid: args.uuid });
+                case "scene_begin_undo":
+                    await (Editor.Message.request as any)("scene", "begin-recording");
+                    return ok({ success: true });
+                case "scene_end_undo":
+                    await (Editor.Message.request as any)("scene", "end-recording");
+                    return ok({ success: true });
+                case "scene_cancel_undo":
+                    await (Editor.Message.request as any)("scene", "cancel-recording");
+                    return ok({ success: true });
+                case "scene_save_as": {
+                    const result = await (Editor.Message.request as any)("scene", "save-as-scene");
+                    return ok({ success: true, result });
+                }
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }

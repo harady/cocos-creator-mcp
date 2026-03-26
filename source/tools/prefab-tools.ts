@@ -61,6 +61,29 @@ export class PrefabTools implements ToolCategory {
                 },
             },
             {
+                name: "prefab_duplicate",
+                description: "Duplicate a prefab asset to a new path.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        source: { type: "string", description: "Source prefab db:// path" },
+                        destination: { type: "string", description: "Destination db:// path" },
+                    },
+                    required: ["source", "destination"],
+                },
+            },
+            {
+                name: "prefab_validate",
+                description: "Validate a prefab for missing references or broken links.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Prefab asset UUID" },
+                    },
+                    required: ["uuid"],
+                },
+            },
+            {
                 name: "prefab_revert",
                 description: "Revert a prefab instance node to its original prefab state.",
                 inputSchema: {
@@ -86,6 +109,19 @@ export class PrefabTools implements ToolCategory {
                 return this.getPrefabInfo(args.uuid);
             case "prefab_update":
                 return this.updatePrefab(args.uuid);
+            case "prefab_duplicate": {
+                try {
+                    await (Editor.Message.request as any)("asset-db", "copy-asset", args.source, args.destination);
+                    return ok({ success: true, source: args.source, destination: args.destination });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
+            case "prefab_validate": {
+                try {
+                    const info = await (Editor.Message.request as any)("asset-db", "query-asset-info", args.uuid);
+                    const deps = await (Editor.Message.request as any)("asset-db", "query-depends", args.uuid).catch(() => []);
+                    return ok({ success: true, uuid: args.uuid, info, dependencies: deps, valid: !!info });
+                } catch (e: any) { return err(e.message || String(e)); }
+            }
             case "prefab_revert":
                 return this.revertPrefab(args.uuid);
             default:

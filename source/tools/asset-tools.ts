@@ -141,6 +141,46 @@ export class AssetTools implements ToolCategory {
                     required: ["path"],
                 },
             },
+            {
+                name: "asset_import",
+                description: "Import an external file into the project assets.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        source: { type: "string", description: "Source file path on disk" },
+                        target: { type: "string", description: "Target db:// path in project" },
+                    },
+                    required: ["source", "target"],
+                },
+            },
+            {
+                name: "asset_save_meta",
+                description: "Save asset meta information (importer settings, etc.).",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Asset UUID" },
+                        meta: { type: "string", description: "Meta JSON string" },
+                    },
+                    required: ["uuid", "meta"],
+                },
+            },
+            {
+                name: "asset_generate_available_url",
+                description: "Generate a non-conflicting asset URL (avoids name collisions).",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        url: { type: "string", description: "Desired db:// path" },
+                    },
+                    required: ["url"],
+                },
+            },
+            {
+                name: "asset_query_ready",
+                description: "Check if the asset database is ready.",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -199,6 +239,20 @@ export class AssetTools implements ToolCategory {
                 case "asset_open_external":
                     await (Editor.Message.request as any)("asset-db", "open-asset", args.path);
                     return ok({ success: true, path: args.path });
+                case "asset_import":
+                    await (Editor.Message.request as any)("asset-db", "import-asset", args.source, args.target);
+                    return ok({ success: true, source: args.source, target: args.target });
+                case "asset_save_meta":
+                    await (Editor.Message.request as any)("asset-db", "save-asset-meta", args.uuid, args.meta);
+                    return ok({ success: true, uuid: args.uuid });
+                case "asset_generate_available_url": {
+                    const url = await (Editor.Message.request as any)("asset-db", "generate-available-url", args.url);
+                    return ok({ success: true, url });
+                }
+                case "asset_query_ready": {
+                    const ready = await (Editor.Message.request as any)("asset-db", "query-ready");
+                    return ok({ success: true, ready });
+                }
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }

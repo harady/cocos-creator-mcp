@@ -55,6 +55,37 @@ export class DebugTools implements ToolCategory {
                 inputSchema: { type: "object", properties: {} },
             },
             {
+                name: "debug_get_project_logs",
+                description: "Read recent project log entries from the log file.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        lines: { type: "number", description: "Number of lines to read (default 100)" },
+                    },
+                },
+            },
+            {
+                name: "debug_search_project_logs",
+                description: "Search for a pattern in project logs.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        pattern: { type: "string", description: "Search pattern (regex supported)" },
+                    },
+                    required: ["pattern"],
+                },
+            },
+            {
+                name: "debug_get_log_file_info",
+                description: "Get information about the project log file (size, path, last modified).",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "debug_validate_scene",
+                description: "Validate the current scene for common issues.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
                 name: "debug_get_extension_info",
                 description: "Get detailed information about a specific extension.",
                 inputSchema: {
@@ -84,6 +115,14 @@ export class DebugTools implements ToolCategory {
                     return ok({ success: true });
                 case "debug_list_extensions":
                     return this.listExtensions();
+                case "debug_get_project_logs":
+                    return this.getProjectLogs(args.lines || 100);
+                case "debug_search_project_logs":
+                    return this.searchProjectLogs(args.pattern);
+                case "debug_get_log_file_info":
+                    return this.getLogFileInfo();
+                case "debug_validate_scene":
+                    return this.validateScene();
                 case "debug_get_extension_info":
                     return this.getExtensionInfo(args.name);
                 default:
@@ -162,6 +201,67 @@ export class DebugTools implements ToolCategory {
         try {
             const info = await (Editor.Message.request as any)("extension", "query-info", name);
             return ok({ success: true, name, info });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async getProjectLogs(lines: number): Promise<ToolResult> {
+        try {
+            const fs = require("fs");
+            const path = require("path");
+            const logPath = path.join(Editor.Project.tmpDir, "logs", "project.log");
+            if (!fs.existsSync(logPath)) return ok({ success: true, logs: [], note: "Log file not found" });
+            const content = fs.readFileSync(logPath, "utf-8");
+            const allLines = content.split("\n");
+            const recent = allLines.slice(-lines);
+            return ok({ success: true, lines: recent.length, logs: recent });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async searchProjectLogs(pattern: string): Promise<ToolResult> {
+        try {
+            const fs = require("fs");
+            const path = require("path");
+            const logPath = path.join(Editor.Project.tmpDir, "logs", "project.log");
+            if (!fs.existsSync(logPath)) return ok({ success: true, matches: [] });
+            const content = fs.readFileSync(logPath, "utf-8");
+            const regex = new RegExp(pattern, "gi");
+            const matches = content.split("\n").filter((line: string) => regex.test(line));
+            return ok({ success: true, pattern, count: matches.length, matches: matches.slice(0, 100) });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async getLogFileInfo(): Promise<ToolResult> {
+        try {
+            const fs = require("fs");
+            const path = require("path");
+            const logPath = path.join(Editor.Project.tmpDir, "logs", "project.log");
+            if (!fs.existsSync(logPath)) return ok({ success: true, exists: false });
+            const stat = fs.statSync(logPath);
+            return ok({ success: true, exists: true, path: logPath, size: stat.size, modified: stat.mtime });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async validateScene(): Promise<ToolResult> {
+        try {
+            const tree = await Editor.Message.request("scene", "query-node-tree");
+            const issues: string[] = [];
+            const checkNodes = (nodes: any[]) => {
+                if (!nodes) return;
+                for (const node of nodes) {
+                    if (!node.name) issues.push(`Node ${node.uuid} has no name`);
+                    if (node.children) checkNodes(node.children);
+                }
+            };
+            if (Array.isArray(tree)) checkNodes(tree);
+            return ok({ success: true, issueCount: issues.length, issues });
         } catch (e: any) {
             return err(e.message || String(e));
         }

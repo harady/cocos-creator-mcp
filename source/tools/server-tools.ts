@@ -21,6 +21,16 @@ export class ServerTools implements ToolCategory {
                 description: "Get the editor server status (IP, port, connectivity).",
                 inputSchema: { type: "object", properties: {} },
             },
+            {
+                name: "server_check_connectivity",
+                description: "Check if the editor server is reachable.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "server_get_network_interfaces",
+                description: "Get detailed network interface information.",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -41,6 +51,19 @@ export class ServerTools implements ToolCategory {
                         (Editor.Message.request as any)("server", "query-port").catch(() => null),
                     ]);
                     return ok({ success: true, ips, port });
+                }
+                case "server_check_connectivity": {
+                    try {
+                        const port = await (Editor.Message.request as any)("server", "query-port");
+                        return ok({ success: true, reachable: true, port });
+                    } catch {
+                        return ok({ success: true, reachable: false });
+                    }
+                }
+                case "server_get_network_interfaces": {
+                    const os = require("os");
+                    const interfaces = os.networkInterfaces();
+                    return ok({ success: true, interfaces });
                 }
                 default:
                     return err(`Unknown tool: ${toolName}`);
