@@ -236,8 +236,8 @@ export class NodeTools implements ToolCategory {
 
     private async moveNode(uuid: string, parentUuid: string): Promise<ToolResult> {
         try {
-            await Editor.Message.request("scene", "move-node", { uuid, parentUuid });
-            return ok({ success: true, uuid, parentUuid });
+            const result = await this.sceneScript("moveNode", [uuid, parentUuid]);
+            return ok(result);
         } catch (e: any) {
             return err(e.message || String(e));
         }

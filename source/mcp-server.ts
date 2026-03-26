@@ -187,7 +187,7 @@ export class McpServer {
                     };
                 } else {
                     try {
-                        const result = await category.execute(toolName, args);
+                        const result = await withTimeout(category.execute(toolName, args), 30000, `Tool ${toolName} timed out`);
                         response = {
                             jsonrpc: "2.0",
                             id: rpc.id,
@@ -234,6 +234,16 @@ export class McpServer {
         }
         res.end();
     }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(message)), ms);
+        promise.then(
+            (v) => { clearTimeout(timer); resolve(v); },
+            (e) => { clearTimeout(timer); reject(e); },
+        );
+    });
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {

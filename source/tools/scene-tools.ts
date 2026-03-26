@@ -103,8 +103,9 @@ export class SceneTools implements ToolCategory {
 
     private async saveScene(): Promise<ToolResult> {
         try {
-            await Editor.Message.request("scene", "save-scene");
-            return ok({ success: true });
+            // save-scene does not return a response, so use send (fire-and-forget)
+            Editor.Message.send("scene", "save-scene");
+            return ok({ success: true, message: "Save request sent" });
         } catch (e: any) {
             return err(e.message || String(e));
         }

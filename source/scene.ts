@@ -192,6 +192,19 @@ export const methods: Record<string, (...args: any[]) => any> = {
         }
     },
 
+    moveNode(uuid: string, parentUuid: string) {
+        try {
+            const node = findNode(uuid);
+            if (!node) return { success: false, error: `Node ${uuid} not found` };
+            const parent = findNode(parentUuid);
+            if (!parent) return { success: false, error: `Parent ${parentUuid} not found` };
+            node.setParent(parent);
+            return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    },
+
     removeComponentFromNode(uuid: string, componentType: string) {
         try {
             const { js } = require("cc");
