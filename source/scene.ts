@@ -7,6 +7,54 @@
 import { join } from "path";
 module.paths.push(join(Editor.App.path, "node_modules"));
 
+// ─── Console Log Buffer ───
+
+interface ConsoleLogEntry {
+    timestamp: string;
+    level: "log" | "warn" | "error";
+    message: string;
+}
+
+const MAX_LOG_BUFFER = 500;
+const _consoleLogs: ConsoleLogEntry[] = [];
+
+const _originalLog = console.log;
+const _originalWarn = console.warn;
+const _originalError = console.error;
+
+function formatArgs(args: any[]): string {
+    return args.map(a => {
+        if (typeof a === "string") return a;
+        try { return JSON.stringify(a); } catch { return String(a); }
+    }).join(" ");
+}
+
+function pushLog(level: ConsoleLogEntry["level"], args: any[]): void {
+    _consoleLogs.push({
+        timestamp: new Date().toISOString(),
+        level,
+        message: formatArgs(args),
+    });
+    if (_consoleLogs.length > MAX_LOG_BUFFER) {
+        _consoleLogs.splice(0, _consoleLogs.length - MAX_LOG_BUFFER);
+    }
+}
+
+console.log = function (...args: any[]) {
+    _originalLog.apply(console, args);
+    pushLog("log", args);
+};
+
+console.warn = function (...args: any[]) {
+    _originalWarn.apply(console, args);
+    pushLog("warn", args);
+};
+
+console.error = function (...args: any[]) {
+    _originalError.apply(console, args);
+    pushLog("error", args);
+};
+
 function getScene() {
     const { director } = require("cc");
     return director.getScene();
@@ -203,6 +251,24 @@ export const methods: Record<string, (...args: any[]) => any> = {
         } catch (e: any) {
             return { success: false, error: e.message };
         }
+    },
+
+    testLog(message: string = "test message") {
+        console.log("[testLog]", message);
+        return { success: true, bufferSize: _consoleLogs.length };
+    },
+
+    getConsoleLogs(count: number = 50, level?: string) {
+        let logs = _consoleLogs;
+        if (level) {
+            logs = logs.filter(l => l.level === level);
+        }
+        return { success: true, logs: logs.slice(-count), total: _consoleLogs.length };
+    },
+
+    clearConsoleLogs() {
+        _consoleLogs.length = 0;
+        return { success: true };
     },
 
     removeComponentFromNode(uuid: string, componentType: string) {

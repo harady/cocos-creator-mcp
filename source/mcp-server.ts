@@ -3,6 +3,30 @@ import { ToolCategory, ToolDefinition, JsonRpcRequest, JsonRpcResponse, ServerCo
 
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 
+// ─── Game Preview Log Buffer ───
+
+interface GameLogEntry {
+    timestamp: string;
+    level: "log" | "warn" | "error";
+    message: string;
+}
+
+const MAX_GAME_LOG_BUFFER = 500;
+const _gameLogs: GameLogEntry[] = [];
+
+/** Access game preview log buffer from debug-tools */
+export function getGameLogs(count: number, level?: string): { logs: GameLogEntry[]; total: number } {
+    let logs = _gameLogs;
+    if (level) {
+        logs = logs.filter(l => l.level === level);
+    }
+    return { logs: logs.slice(-count), total: _gameLogs.length };
+}
+
+export function clearGameLogs(): void {
+    _gameLogs.length = 0;
+}
+
 export class McpServer {
     private server: http.Server | null = null;
     private tools: Map<string, ToolCategory> = new Map();
@@ -91,6 +115,27 @@ export class McpServer {
         if (url === "/health" && req.method === "GET") {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ status: "ok", tools: this.getAllTools().length }));
+            return;
+        }
+
+        // Game preview log receiver
+        if (url === "/log" && req.method === "POST") {
+            const body = await readBody(req);
+            try {
+                const entries: GameLogEntry[] = JSON.parse(body);
+                for (const entry of (Array.isArray(entries) ? entries : [entries])) {
+                    _gameLogs.push({
+                        timestamp: entry.timestamp || new Date().toISOString(),
+                        level: entry.level || "log",
+                        message: entry.message || "",
+                    });
+                }
+                if (_gameLogs.length > MAX_GAME_LOG_BUFFER) {
+                    _gameLogs.splice(0, _gameLogs.length - MAX_GAME_LOG_BUFFER);
+                }
+            } catch { /* ignore malformed */ }
+            res.writeHead(204);
+            res.end();
             return;
         }
 

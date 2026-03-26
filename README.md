@@ -252,8 +252,8 @@ curl http://127.0.0.1:3000/health
 | `debug_get_editor_info` | Get editor version and environment |
 | `debug_list_messages` | List available Editor messages |
 | `debug_execute_script` | Execute scene script method |
-| `debug_get_console_logs` | Get console log entries |
-| `debug_clear_console` | Clear editor console |
+| `debug_get_console_logs` | Get console log entries (scene + game preview) |
+| `debug_clear_console` | Clear editor console and log buffers |
 | `debug_list_extensions` | List installed extensions |
 | `debug_get_extension_info` | Get extension details |
 | `debug_get_project_logs` | Read project log entries |
@@ -306,6 +306,65 @@ curl http://127.0.0.1:3000/health
 | `refimage_refresh` | Refresh image display |
 </details>
 
+## Console Log Capture
+
+`debug_get_console_logs` captures logs from two sources:
+
+### Scene Process Logs (automatic)
+
+Console output from scene scripts (`console.log/warn/error` in the scene renderer process) is automatically captured. No setup required.
+
+### Game Preview Logs (opt-in)
+
+Game code runs in a browser during preview, which is a separate process. To capture game preview logs, your game code needs to send logs to the MCP server's `/log` endpoint.
+
+**Setup:**
+
+Add a console capture script to your game project:
+
+```typescript
+const MCP_LOG_URL = "http://127.0.0.1:3000/log";
+const FLUSH_INTERVAL = 500;
+
+let buffer: Array<{ timestamp: string; level: string; message: string }> = [];
+
+function hook(level: string, original: (...args: any[]) => void) {
+    return function (...args: any[]) {
+        original.apply(console, args);
+        buffer.push({
+            timestamp: new Date().toISOString(),
+            level,
+            message: args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" "),
+        });
+    };
+}
+
+console.log = hook("log", console.log);
+console.warn = hook("warn", console.warn);
+console.error = hook("error", console.error);
+
+setInterval(() => {
+    if (buffer.length === 0) return;
+    const entries = buffer.splice(0, 50);
+    fetch(MCP_LOG_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entries),
+    }).catch(() => {}); // silently ignore if MCP server is not running
+}, FLUSH_INTERVAL);
+```
+
+**`POST /log` format:**
+
+```json
+[
+  { "timestamp": "2026-03-26T12:00:00.000Z", "level": "log", "message": "Hello" },
+  { "timestamp": "2026-03-26T12:00:01.000Z", "level": "error", "message": "Something failed" }
+]
+```
+
+Both scene and game logs are merged chronologically when retrieved via `debug_get_console_logs`. Each log entry includes a `source` field (`"scene"` or `"game"`) to distinguish the origin.
+
 ## Configuration
 
 Settings are stored in `{project}/settings/cocos-creator-mcp.json`:
@@ -334,6 +393,7 @@ node test/regression.mjs 3001    # custom port
 - **v0.1** — MCP server + scene/node tools (13 tools)
 - **v0.5** — Component, prefab, project, debug tools (27 tools)
 - **v1.0** — Full tool coverage (145 tools, 13 categories, 224 test assertions)
+- **v1.1** — Console log capture (scene process auto-capture + game preview via `/log` endpoint)
 
 ## Development
 
