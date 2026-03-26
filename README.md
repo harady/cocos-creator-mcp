@@ -2,17 +2,17 @@
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server extension for Cocos Creator 3.8+.
 
-AI assistants like Claude can control Cocos Creator editor through this extension — creating nodes, editing scenes, managing assets, and more.
+AI assistants like Claude can control Cocos Creator editor through this extension — creating nodes, editing scenes, managing prefabs, and more.
 
 ## Features
 
+- **27 Tools** — Scene, node, component, prefab, project, and debug operations
 - **Streamable HTTP (SSE)** — Native support for MCP's Streamable HTTP transport
 - **JSON-RPC 2.0** — Standard MCP protocol compliance
-- **Scene Tools** — Get hierarchy, open/save scenes, list scene files
-- **Node Tools** — Create, delete, move, duplicate, find, and edit nodes
+- **Prefab Property Persistence** — Component properties (Label.string, fontSize, etc.) are correctly preserved when saving prefabs
 - **Auto Start** — Server starts automatically when the extension loads
 - **i18n** — English, Japanese, Chinese
-- **Regression Tests** — 51 assertions covering all tools
+- **Regression Tests** — 78 assertions covering all 27 tools
 
 ## Quick Start
 
@@ -96,6 +96,40 @@ curl -X POST http://127.0.0.1:3001/mcp \
 | `node_duplicate` | Duplicate a node |
 | `node_get_all` | Get a flat list of all nodes in the scene |
 
+### Component (4 tools)
+
+| Tool | Description |
+|------|-------------|
+| `component_add` | Add a component to a node (e.g. `cc.Label`, `cc.Sprite`, `cc.Button`) |
+| `component_remove` | Remove a component from a node |
+| `component_get_components` | Get all components on a node with their properties |
+| `component_set_property` | Set a component property (e.g. Label.string, Label.fontSize, Sprite.color) |
+
+### Prefab (4 tools)
+
+| Tool | Description |
+|------|-------------|
+| `prefab_list` | List all prefab files in the project |
+| `prefab_create` | Create a prefab from an existing node (properties are preserved) |
+| `prefab_instantiate` | Instantiate a prefab into the scene |
+| `prefab_get_info` | Get information about a prefab asset |
+
+### Project (4 tools)
+
+| Tool | Description |
+|------|-------------|
+| `project_get_info` | Get project information (name, path) |
+| `project_refresh_assets` | Refresh the asset database to detect file changes |
+| `project_get_asset_info` | Get information about an asset by UUID |
+| `project_find_asset` | Find assets by glob pattern (e.g. `db://assets/**/*.ts`) |
+
+### Debug (2 tools)
+
+| Tool | Description |
+|------|-------------|
+| `debug_get_editor_info` | Get Cocos Creator editor version and environment info |
+| `debug_list_messages` | List available Editor messages for a target module |
+
 ## Configuration
 
 Settings are stored in `{project}/settings/cocos-creator-mcp.json`:
@@ -123,8 +157,8 @@ node test/regression.mjs 3000   # custom port
 
 ## Roadmap
 
-- [x] **v0.1** — MCP server + scene/node tools (13 tools, 51 test assertions)
-- [ ] **v0.5** — Component, prefab, project, debug tools
+- [x] **v0.1** — MCP server + scene/node tools (13 tools)
+- [x] **v0.5** — Component, prefab, project, debug tools (27 tools, 78 test assertions)
 - [ ] **v1.0** — Full tool coverage, npm publish
 
 ## Development
@@ -135,8 +169,9 @@ npm run build   # One-time build
 ```
 
 After building, reload the extension in Cocos Creator:
-- **Extension Manager** — disable then re-enable
-- **Developer > Reload** — reloads main process (scene scripts require full restart)
+- **Extension Manager** — disable then re-enable (for tool registration changes)
+- **Developer > Reload** — reloads main process
+- **Full restart** — required for scene script changes
 
 ## Requirements
 
