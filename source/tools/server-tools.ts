@@ -1,5 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
+import { BUILD_ID } from "../mcp-server";
 
 export class ServerTools implements ToolCategory {
     readonly categoryName = "server";
@@ -50,7 +51,7 @@ export class ServerTools implements ToolCategory {
                         (Editor.Message.request as any)("server", "query-ip-list").catch(() => []),
                         (Editor.Message.request as any)("server", "query-port").catch(() => null),
                     ]);
-                    return ok({ success: true, ips, port });
+                    return ok({ success: true, ips, port, buildId: BUILD_ID });
                 }
                 case "server_check_connectivity": {
                     try {
