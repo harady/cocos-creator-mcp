@@ -105,6 +105,104 @@ export class SceneAdvancedTools implements ToolCategory {
                 description: "Create a new empty scene.",
                 inputSchema: { type: "object", properties: {} },
             },
+            {
+                name: "scene_cut_node",
+                description: "Cut a node to clipboard (removes from scene).",
+                inputSchema: {
+                    type: "object",
+                    properties: { uuid: { type: "string", description: "Node UUID" } },
+                    required: ["uuid"],
+                },
+            },
+            {
+                name: "scene_reset_property",
+                description: "Reset a specific property on a node or component to its default value.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node or component UUID" },
+                        path: { type: "string", description: "Property path (e.g. 'position', 'color')" },
+                    },
+                    required: ["uuid", "path"],
+                },
+            },
+            {
+                name: "scene_reset_component",
+                description: "Reset a component to its default state.",
+                inputSchema: {
+                    type: "object",
+                    properties: { uuid: { type: "string", description: "Component UUID" } },
+                    required: ["uuid"],
+                },
+            },
+            {
+                name: "scene_execute_component_method",
+                description: "Call a method on a component at edit-time.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Component UUID" },
+                        method: { type: "string", description: "Method name" },
+                        args: { type: "array", description: "Method arguments", items: {} },
+                    },
+                    required: ["uuid", "method"],
+                },
+            },
+            {
+                name: "scene_move_array_element",
+                description: "Move an array element to a new position in a property.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node or component UUID" },
+                        path: { type: "string", description: "Array property path" },
+                        target: { type: "number", description: "Current index" },
+                        offset: { type: "number", description: "Move offset (+1 = down, -1 = up)" },
+                    },
+                    required: ["uuid", "path", "target", "offset"],
+                },
+            },
+            {
+                name: "scene_remove_array_element",
+                description: "Remove an element from an array property by index.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node or component UUID" },
+                        path: { type: "string", description: "Array property path" },
+                        index: { type: "number", description: "Index to remove" },
+                    },
+                    required: ["uuid", "path", "index"],
+                },
+            },
+            {
+                name: "scene_snapshot_abort",
+                description: "Abort the current undo snapshot.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "scene_query_ready",
+                description: "Check if the scene is fully loaded and ready.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "scene_query_component_has_script",
+                description: "Check if a component has an associated script file.",
+                inputSchema: {
+                    type: "object",
+                    properties: { name: { type: "string", description: "Component class name" } },
+                    required: ["name"],
+                },
+            },
+            {
+                name: "scene_restore_prefab",
+                description: "Restore a prefab node to its original prefab state.",
+                inputSchema: {
+                    type: "object",
+                    properties: { uuid: { type: "string", description: "Node UUID" } },
+                    required: ["uuid"],
+                },
+            },
         ];
     }
 
@@ -150,6 +248,39 @@ export class SceneAdvancedTools implements ToolCategory {
                 case "scene_create":
                     await (Editor.Message.request as any)("scene", "new-scene");
                     return ok({ success: true });
+                case "scene_cut_node":
+                    await (Editor.Message.request as any)("scene", "cut-node", args.uuid);
+                    return ok({ success: true, uuid: args.uuid });
+                case "scene_reset_property":
+                    await (Editor.Message.request as any)("scene", "reset-property", { uuid: args.uuid, path: args.path });
+                    return ok({ success: true });
+                case "scene_reset_component":
+                    await (Editor.Message.request as any)("scene", "reset-component", { uuid: args.uuid });
+                    return ok({ success: true });
+                case "scene_execute_component_method": {
+                    const result = await (Editor.Message.request as any)("scene", "execute-component-method", { uuid: args.uuid, name: args.method, args: args.args || [] });
+                    return ok({ success: true, result });
+                }
+                case "scene_move_array_element":
+                    await (Editor.Message.request as any)("scene", "move-array-element", { uuid: args.uuid, path: args.path, target: args.target, offset: args.offset });
+                    return ok({ success: true });
+                case "scene_remove_array_element":
+                    await (Editor.Message.request as any)("scene", "remove-array-element", { uuid: args.uuid, path: args.path, index: args.index });
+                    return ok({ success: true });
+                case "scene_snapshot_abort":
+                    await (Editor.Message.request as any)("scene", "snapshot-abort");
+                    return ok({ success: true });
+                case "scene_query_ready": {
+                    const ready = await (Editor.Message.request as any)("scene", "query-is-ready");
+                    return ok({ success: true, ready });
+                }
+                case "scene_query_component_has_script": {
+                    const hasScript = await (Editor.Message.request as any)("scene", "query-component-has-script", args.name);
+                    return ok({ success: true, name: args.name, hasScript });
+                }
+                case "scene_restore_prefab":
+                    await (Editor.Message.request as any)("scene", "restore-prefab", { uuid: args.uuid });
+                    return ok({ success: true, uuid: args.uuid });
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }

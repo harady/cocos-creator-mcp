@@ -102,6 +102,49 @@ export class SceneViewTools implements ToolCategory {
                 description: "Get the current scene view status (gizmo tool, pivot, coordinate, grid, etc.).",
                 inputSchema: { type: "object", properties: {} },
             },
+            {
+                name: "view_set_icon_gizmo_3d",
+                description: "Toggle 3D icon gizmos on/off.",
+                inputSchema: {
+                    type: "object",
+                    properties: { enabled: { type: "boolean" } },
+                    required: ["enabled"],
+                },
+            },
+            {
+                name: "view_query_icon_gizmo_3d",
+                description: "Check if 3D icon gizmos are enabled.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "view_set_icon_gizmo_size",
+                description: "Set the icon gizmo size.",
+                inputSchema: {
+                    type: "object",
+                    properties: { size: { type: "number" } },
+                    required: ["size"],
+                },
+            },
+            {
+                name: "view_query_icon_gizmo_size",
+                description: "Get the current icon gizmo size.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "view_align_with_view",
+                description: "Align the selected node with the current camera view.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "view_align_view_with_node",
+                description: "Align the camera view with the selected node.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "view_reset",
+                description: "Reset the scene view to default state.",
+                inputSchema: { type: "object", properties: {} },
+            },
         ];
     }
 
@@ -156,6 +199,29 @@ export class SceneViewTools implements ToolCategory {
                     ]);
                     return ok({ success: true, tool, pivot, coordinate: coord, mode, gridVisible: grid });
                 }
+                case "view_set_icon_gizmo_3d":
+                    await (Editor.Message.request as any)("scene", "set-icon-gizmo-3d", args.enabled);
+                    return ok({ success: true, enabled: args.enabled });
+                case "view_query_icon_gizmo_3d": {
+                    const enabled = await (Editor.Message.request as any)("scene", "query-is-icon-gizmo-3d");
+                    return ok({ success: true, enabled });
+                }
+                case "view_set_icon_gizmo_size":
+                    await (Editor.Message.request as any)("scene", "set-icon-gizmo-size", args.size);
+                    return ok({ success: true, size: args.size });
+                case "view_query_icon_gizmo_size": {
+                    const size = await (Editor.Message.request as any)("scene", "query-icon-gizmo-size");
+                    return ok({ success: true, size });
+                }
+                case "view_align_with_view":
+                    await (Editor.Message.request as any)("scene", "align-with-view");
+                    return ok({ success: true });
+                case "view_align_view_with_node":
+                    await (Editor.Message.request as any)("scene", "align-view-with-node");
+                    return ok({ success: true });
+                case "view_reset":
+                    await (Editor.Message.request as any)("scene", "reset-scene-view");
+                    return ok({ success: true });
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }

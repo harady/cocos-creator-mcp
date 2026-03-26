@@ -11,6 +11,7 @@ import { AssetTools } from "./tools/asset-tools";
 import { PreferencesTools } from "./tools/preferences-tools";
 import { ServerTools } from "./tools/server-tools";
 import { BuilderTools } from "./tools/builder-tools";
+import { ReferenceImageTools } from "./tools/reference-image-tools";
 import { ServerConfig, DEFAULT_CONFIG } from "./types";
 import path from "path";
 import fs from "fs";
@@ -59,6 +60,7 @@ function createServer(config: ServerConfig): McpServer {
     s.register(new PreferencesTools());
     s.register(new ServerTools());
     s.register(new BuilderTools());
+    s.register(new ReferenceImageTools());
     return s;
 }
 
