@@ -1,0 +1,20 @@
+{
+    "compilerOptions": {
+        "target": "ES2017",
+        "module": "CommonJS",
+        "moduleResolution": "node",
+        "inlineSourceMap": true,
+        "inlineSources": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "outDir": "./dist",
+        "rootDir": "./source",
+        "types": [
+            "node",
+            "@cocos/creator-types/editor"
+        ]
+    }
+}
