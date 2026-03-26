@@ -236,16 +236,28 @@ export class NodeTools implements ToolCategory {
 
     private async moveNode(uuid: string, parentUuid: string): Promise<ToolResult> {
         try {
-            const result = await this.sceneScript("moveNode", [uuid, parentUuid]);
-            return ok(result);
+            await (Editor.Message.request as any)("scene", "set-property", {
+                uuid,
+                path: "parent",
+                dump: { type: "cc.Node", value: { uuid: parentUuid } },
+            });
+            return ok({ success: true, uuid, parentUuid });
         } catch (e: any) {
-            return err(e.message || String(e));
+            // Fallback: try scene script
+            try {
+                const result = await this.sceneScript("moveNode", [uuid, parentUuid]);
+                return ok(result);
+            } catch (e2: any) {
+                return err(e.message || String(e));
+            }
         }
     }
 
     private async duplicateNode(uuid: string): Promise<ToolResult> {
         try {
-            const newUuid = await Editor.Message.request("scene", "duplicate-node", uuid);
+            const result = await Editor.Message.request("scene", "duplicate-node", uuid);
+            // duplicate-node returns an array of UUIDs
+            const newUuid = Array.isArray(result) ? result[0] : result;
             return ok({ success: true, sourceUuid: uuid, newUuid });
         } catch (e: any) {
             return err(e.message || String(e));

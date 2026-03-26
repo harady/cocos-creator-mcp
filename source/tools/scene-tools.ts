@@ -103,9 +103,21 @@ export class SceneTools implements ToolCategory {
 
     private async saveScene(): Promise<ToolResult> {
         try {
-            // save-scene does not return a response, so use send (fire-and-forget)
-            Editor.Message.send("scene", "save-scene");
-            return ok({ success: true, message: "Save request sent" });
+            // Check if current scene has a saved path (has been saved before)
+            const hierarchy = await Editor.Message.request(
+                "scene",
+                "execute-scene-script",
+                { name: EXT_NAME, method: "getSceneHierarchy", args: [false] }
+            );
+            const sceneUuid = hierarchy?.sceneUuid;
+
+            if (!sceneUuid || sceneUuid === "") {
+                return err("Scene has not been saved yet. Use scene_open to open an existing scene first.");
+            }
+
+            // Use asset-db to save the scene file
+            await (Editor.Message.request as any)("asset-db", "save-asset", sceneUuid);
+            return ok({ success: true, sceneUuid });
         } catch (e: any) {
             return err(e.message || String(e));
         }
