@@ -1,6 +1,10 @@
 import { McpServer } from "./mcp-server";
 import { SceneTools } from "./tools/scene-tools";
 import { NodeTools } from "./tools/node-tools";
+import { ComponentTools } from "./tools/component-tools";
+import { PrefabTools } from "./tools/prefab-tools";
+import { ProjectTools } from "./tools/project-tools";
+import { DebugTools } from "./tools/debug-tools";
 import { ServerConfig, DEFAULT_CONFIG } from "./types";
 import path from "path";
 import fs from "fs";
@@ -39,6 +43,10 @@ function createServer(config: ServerConfig): McpServer {
     const s = new McpServer(config);
     s.register(new SceneTools());
     s.register(new NodeTools());
+    s.register(new ComponentTools());
+    s.register(new PrefabTools());
+    s.register(new ProjectTools());
+    s.register(new DebugTools());
     return s;
 }
 
