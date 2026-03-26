@@ -32,7 +32,7 @@ module.exports = Editor.Panel.define({
         if (!this.$.app) return;
         const app = createApp({
             data() {
-                return { running: false, port: 3000, toolCount: 0 };
+                return { running: false, port: 3001, toolCount: 0 };
             },
             methods: {
                 async start(this: any) {

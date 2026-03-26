@@ -49,6 +49,6 @@ export interface ServerConfig {
 }
 
 export const DEFAULT_CONFIG: ServerConfig = {
-    port: 3000,
+    port: 3001,
     autoStart: false,
 };
