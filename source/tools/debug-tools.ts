@@ -212,11 +212,19 @@ export class DebugTools implements ToolCategory {
     }
 
     private async getConsoleLogs(count: number, level?: string): Promise<ToolResult> {
-        // Collect from both sources: scene process + game preview
+        // 1. Try Editor's native console API first (may be supported in future CocosCreator versions)
+        try {
+            const logs = await (Editor.Message.request as any)("console", "query-last-logs", count);
+            if (Array.isArray(logs) && logs.length > 0) {
+                return ok({ success: true, logs, source: "editor-api", note: "Using native Editor console API" });
+            }
+        } catch { /* Not supported in this version — use fallback */ }
+
+        // 2. Fallback: collect from scene process buffer + game preview buffer
         let sceneLogs: any[] = [];
         let gameLogs: any[] = [];
 
-        // 1. Scene process logs
+        // 2a. Scene process logs (console wrapper in scene.ts)
         try {
             const result = await Editor.Message.request("scene", "execute-scene-script", {
                 name: "cocos-creator-mcp",
@@ -228,7 +236,7 @@ export class DebugTools implements ToolCategory {
             }
         } catch { /* scene not available */ }
 
-        // 2. Game preview logs
+        // 2b. Game preview logs (received via POST /log endpoint)
         const gameResult = getGameLogs(count * 2, level);
         gameLogs = gameResult.logs.map((l: any) => ({ ...l, source: "game" }));
 
