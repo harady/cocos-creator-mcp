@@ -90,6 +90,7 @@ export const methods: Record<string, (...args: any[]) => any> = {
             running: server?.isRunning ?? false,
             port: server?.port ?? loadConfig().port,
             toolCount: server?.getAllTools().length ?? 0,
+            toolNames: server?.getAllTools().map((t) => t.name).sort() ?? [],
         };
     },
 };

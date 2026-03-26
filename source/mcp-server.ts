@@ -187,13 +187,17 @@ export class McpServer {
                     };
                 } else {
                     try {
+                        const start = Date.now();
+                        console.log(`[cocos-creator-mcp] ▶ ${toolName}`, Object.keys(args).length > 0 ? JSON.stringify(args).substring(0, 200) : "");
                         const result = await withTimeout(category.execute(toolName, args), 30000, `Tool ${toolName} timed out`);
+                        console.log(`[cocos-creator-mcp] ✓ ${toolName} (${Date.now() - start}ms)`);
                         response = {
                             jsonrpc: "2.0",
                             id: rpc.id,
                             result,
                         };
                     } catch (e: any) {
+                        console.error(`[cocos-creator-mcp] ✗ ${toolName}:`, e.message || String(e));
                         response = {
                             jsonrpc: "2.0",
                             id: rpc.id,
