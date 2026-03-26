@@ -16,5 +16,6 @@
             "node",
             "@cocos/creator-types/editor"
         ]
-    }
+    },
+    "exclude": ["client", "test", "dist"]
 }

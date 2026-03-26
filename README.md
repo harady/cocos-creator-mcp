@@ -306,7 +306,49 @@ curl http://127.0.0.1:3000/health
 | `refimage_refresh` | Refresh image display |
 </details>
 
-## Console Log Capture
+## Client Scripts
+
+The `client/` directory contains TypeScript files to be copied into your Cocos Creator project. These enable runtime communication between the game preview and the MCP server.
+
+### McpConsoleCapture
+
+Captures `console.log/warn/error` from the game preview and sends them to the MCP server.
+
+```typescript
+import { initMcpConsoleCapture } from "./path/to/McpConsoleCapture";
+initMcpConsoleCapture();
+```
+
+### McpDebugClient
+
+Enables AI-driven game control: screenshots, node clicking, and custom commands.
+
+```typescript
+import { initMcpDebugClient } from "./path/to/McpDebugClient";
+
+initMcpDebugClient({
+    customCommands: {
+        // Add project-specific commands
+        state: () => ({ success: true, data: { dump: MyDb.dump() } }),
+        navigate: async (args) => {
+            await MyRouter.goTo(args.page);
+            return { success: true };
+        },
+    },
+});
+```
+
+**Built-in commands** (no setup needed):
+- `screenshot` — Capture game screen via RenderTexture
+- `click` — Click a node by name
+
+**Custom commands** (project-specific):
+- Register any handler via `customCommands` option
+- Called via `debug_game_command` MCP tool
+
+Both scripts silently ignore when the MCP server is not running, so they are safe to leave in development builds.
+
+## Console Log Capture (Details)
 
 `debug_get_console_logs` captures logs from two sources:
 

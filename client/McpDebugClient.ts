@@ -1,0 +1,190 @@
+/**
+ * McpDebugClient — MCPサーバーとCocosCreatorプレビューの双方向通信
+ *
+ * MCPサーバーのコマンドキューをポーリングし、コマンドを実行して結果を返す。
+ * MCPサーバー未起動時は黙って無視（本番影響なし）。
+ *
+ * ビルトインコマンド:
+ *   - screenshot: RenderTexture経由でゲーム画面キャプチャ
+ *   - click: ノード名指定でクリックイベント発火
+ *
+ * カスタムコマンドを追加可能（プロジェクト固有の機能）:
+ *   initMcpDebugClient({
+ *     customCommands: {
+ *       state: () => ({ success: true, data: myDb.dump() }),
+ *       navigate: async (args) => { await myRouter.go(args.page); return { success: true }; },
+ *     },
+ *   });
+ */
+
+import { director, Node, Button, Camera, RenderTexture, gfx } from "cc";
+
+export interface McpDebugClientConfig {
+    /** MCPサーバーのベースURL (default: "http://127.0.0.1:3000") */
+    mcpBaseUrl?: string;
+    /** ポーリング間隔ms (default: 500) */
+    pollInterval?: number;
+    /** プロジェクト固有のコマンドハンドラー */
+    customCommands?: Record<string, (args: any) => any | Promise<any>>;
+}
+
+interface McpCommand {
+    id: string;
+    type: string;
+    args?: any;
+}
+
+let _polling = false;
+let _timer: any = null;
+let _config: Required<Pick<McpDebugClientConfig, "mcpBaseUrl" | "pollInterval">> & { customCommands: Record<string, (args: any) => any | Promise<any>> };
+
+async function pollCommand(): Promise<void> {
+    if (_polling) return;
+    _polling = true;
+    try {
+        const res = await fetch(`${_config.mcpBaseUrl}/game/command`);
+        if (!res.ok) return;
+        const cmd: McpCommand | null = await res.json();
+        if (!cmd) return;
+
+        console.log(`[McpDebugClient] command: ${cmd.type}`, cmd.args || "");
+        const result = await executeCommand(cmd);
+
+        await fetch(`${_config.mcpBaseUrl}/game/result`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(result),
+        }).catch(() => {});
+    } catch {
+        // MCP server not running
+    } finally {
+        _polling = false;
+    }
+}
+
+async function executeCommand(cmd: McpCommand): Promise<any> {
+    try {
+        // ビルトインコマンド
+        switch (cmd.type) {
+            case "screenshot":
+                return { id: cmd.id, ...takeScreenshot() };
+            case "click":
+                return { id: cmd.id, ...clickNode(cmd.args?.name) };
+        }
+        // カスタムコマンド
+        const handler = _config.customCommands[cmd.type];
+        if (handler) {
+            const result = await handler(cmd.args);
+            return { id: cmd.id, ...result };
+        }
+        return { id: cmd.id, success: false, error: `Unknown command: ${cmd.type}` };
+    } catch (e: any) {
+        return { id: cmd.id, success: false, error: e.message || String(e) };
+    }
+}
+
+// ─── ビルトインコマンド ───
+
+function takeScreenshot(): { success: boolean; data?: any; error?: string } {
+    try {
+        const scene = director.getScene();
+        if (!scene) return { success: false, error: "No active scene" };
+
+        let camera: Camera | null = null;
+        const findCamera = (node: Node) => {
+            const cam = node.getComponent(Camera);
+            if (cam && cam.enabled) { camera = cam; return; }
+            for (const child of node.children) {
+                if (camera) return;
+                findCamera(child);
+            }
+        };
+        findCamera(scene);
+        if (!camera) return { success: false, error: "No camera found" };
+
+        const cam = camera as Camera;
+        const width = Math.floor(cam.camera.width);
+        const height = Math.floor(cam.camera.height);
+
+        const rt = new RenderTexture();
+        rt.reset({ width, height });
+
+        const prevTarget = cam.targetTexture;
+        cam.targetTexture = rt;
+        director.root!.frameMove(0);
+        cam.targetTexture = prevTarget;
+
+        const region = new gfx.BufferTextureCopy();
+        region.texOffset.x = 0;
+        region.texOffset.y = 0;
+        region.texExtent.width = width;
+        region.texExtent.height = height;
+
+        const buffer = new Uint8Array(width * height * 4);
+        const gfxTex = rt.getGFXTexture()!;
+        director.root!.device.copyTextureToBuffers(gfxTex, [buffer], [region]);
+
+        const cvs = document.createElement("canvas");
+        cvs.width = width;
+        cvs.height = height;
+        const ctx = cvs.getContext("2d")!;
+        const imageData = ctx.createImageData(width, height);
+
+        for (let y = 0; y < height; y++) {
+            const srcRow = (height - 1 - y) * width * 4;
+            const dstRow = y * width * 4;
+            for (let x = 0; x < width * 4; x++) {
+                imageData.data[dstRow + x] = buffer[srcRow + x];
+            }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        const dataUrl = cvs.toDataURL("image/png");
+        rt.destroy();
+
+        return { success: true, data: { dataUrl, width, height } };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}
+
+function clickNode(name?: string): { success: boolean; error?: string } {
+    if (!name) return { success: false, error: "name argument required" };
+    const scene = director.getScene();
+    if (!scene) return { success: false, error: "No active scene" };
+
+    const found = findNodeByName(scene, name);
+    if (!found) return { success: false, error: `Node '${name}' not found` };
+
+    found.emit(Button.EventType.CLICK, found);
+    return { success: true };
+}
+
+function findNodeByName(root: Node, name: string): Node | null {
+    if (root.name === name) return root;
+    for (const child of root.children) {
+        const found = findNodeByName(child, name);
+        if (found) return found;
+    }
+    return null;
+}
+
+// ─── 初期化・停止 ───
+
+export function initMcpDebugClient(config?: McpDebugClientConfig): void {
+    if (_timer) return;
+    _config = {
+        mcpBaseUrl: config?.mcpBaseUrl ?? "http://127.0.0.1:3000",
+        pollInterval: config?.pollInterval ?? 500,
+        customCommands: config?.customCommands ?? {},
+    };
+    _timer = setInterval(pollCommand, _config.pollInterval);
+    console.log("[McpDebugClient] initialized");
+}
+
+export function stopMcpDebugClient(): void {
+    if (_timer) {
+        clearInterval(_timer);
+        _timer = null;
+    }
+}
