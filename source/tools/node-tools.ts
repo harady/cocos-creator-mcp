@@ -128,6 +128,30 @@ export class NodeTools implements ToolCategory {
                     properties: {},
                 },
             },
+            {
+                name: "node_set_active",
+                description: "Set a node's active (visible) state.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID" },
+                        active: { type: "boolean", description: "Whether the node is active" },
+                    },
+                    required: ["uuid", "active"],
+                },
+            },
+            {
+                name: "node_set_layer",
+                description: "Set a node's layer.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID" },
+                        layer: { type: "number", description: "Layer value" },
+                    },
+                    required: ["uuid", "layer"],
+                },
+            },
         ];
     }
 
@@ -151,6 +175,10 @@ export class NodeTools implements ToolCategory {
                 return this.duplicateNode(args.uuid);
             case "node_get_all":
                 return this.getAllNodes();
+            case "node_set_active":
+                return this.setProperty(args.uuid, "active", args.active);
+            case "node_set_layer":
+                return this.setProperty(args.uuid, "layer", args.layer);
             default:
                 return err(`Unknown tool: ${toolName}`);
         }
