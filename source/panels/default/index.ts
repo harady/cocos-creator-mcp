@@ -60,7 +60,7 @@ h2 { margin: 0 0 8px 0; font-size: 16px; }
             data() {
                 return {
                     running: false,
-                    port: 3001,
+                    port: 3000,
                     toolCount: 0,
                     error: "",
                     showTools: false,
