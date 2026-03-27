@@ -111,6 +111,7 @@ export class DebugTools implements ToolCategory {
                         type: { type: "string", description: "Command type: 'screenshot', 'state', 'navigate', 'click'" },
                         args: { description: "Command arguments (e.g. {page: 'HomePageView'} for navigate, {name: 'ButtonName'} for click)" },
                         timeout: { type: "number", description: "Max wait time in ms (default 5000)" },
+                        maxWidth: { type: "number", description: "Max width for screenshot resize (default: 960, 0 = no resize)" },
                     },
                     required: ["type"],
                 },
@@ -122,6 +123,7 @@ export class DebugTools implements ToolCategory {
                     type: "object",
                     properties: {
                         savePath: { type: "string", description: "File path to save the PNG (default: temp/screenshots/screenshot_<timestamp>.png)" },
+                        maxWidth: { type: "number", description: "Max width in pixels for resize (default: 960, 0 = no resize). Aspect ratio is preserved." },
                     },
                 },
             },
@@ -192,9 +194,9 @@ export class DebugTools implements ToolCategory {
                     await (Editor.Message.request as any)("program", "open-url", args.url);
                     return ok({ success: true, url: args.url });
                 case "debug_game_command":
-                    return this.gameCommand(args.type || args.command, args.args, args.timeout || 5000);
+                    return this.gameCommand(args.type || args.command, args.args, args.timeout || 5000, args.maxWidth);
                 case "debug_screenshot":
-                    return this.takeScreenshot(args.savePath);
+                    return this.takeScreenshot(args.savePath, args.maxWidth);
                 case "debug_preview":
                     return this.handlePreview(args.action || "start");
                 case "debug_clear_code_cache":
@@ -491,7 +493,7 @@ export class DebugTools implements ToolCategory {
         }
     }
 
-    private async gameCommand(type: string, args: any, timeout: number): Promise<ToolResult> {
+    private async gameCommand(type: string, args: any, timeout: number, maxWidth?: number): Promise<ToolResult> {
         const cmdId = queueGameCommand(type, args);
 
         // Poll for result
@@ -507,10 +509,21 @@ export class DebugTools implements ToolCategory {
                         const dir = path.join(Editor.Project.tmpDir, "screenshots");
                         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-                        const filePath = path.join(dir, `game_${timestamp}.png`);
                         const base64 = result.data.dataUrl.replace(/^data:image\/png;base64,/, "");
-                        fs.writeFileSync(filePath, Buffer.from(base64, "base64"));
-                        return ok({ success: true, path: filePath, ...result.data });
+                        const pngBuffer = Buffer.from(base64, "base64");
+                        const effectiveMaxWidth = maxWidth !== undefined ? maxWidth : 960;
+                        const electron = require("electron");
+                        const origImage = electron.nativeImage.createFromBuffer(pngBuffer);
+                        const originalSize = origImage.getSize();
+                        const { buffer, width, height, format } = await this.processImage(pngBuffer, effectiveMaxWidth);
+                        const ext = format === "webp" ? "webp" : format === "jpeg" ? "jpg" : "png";
+                        const filePath = path.join(dir, `game_${timestamp}.${ext}`);
+                        fs.writeFileSync(filePath, buffer);
+                        return ok({
+                            success: true, path: filePath, size: buffer.length, format,
+                            originalSize: `${originalSize.width}x${originalSize.height}`,
+                            savedSize: `${width}x${height}`,
+                        });
                     } catch (e: any) {
                         return ok({ success: true, note: "Screenshot captured but file save failed", error: e.message });
                     }
@@ -522,7 +535,38 @@ export class DebugTools implements ToolCategory {
         return err(`Game did not respond within ${timeout}ms. Is GameDebugClient running in the preview?`);
     }
 
-    private async takeScreenshot(savePath?: string): Promise<ToolResult> {
+    private async processImage(pngBuffer: Buffer, maxWidth: number): Promise<{ buffer: Buffer; width: number; height: number; format: string }> {
+        try {
+            const Vips = require("wasm-vips");
+            const vips = await Vips();
+            let image = vips.Image.newFromBuffer(pngBuffer);
+            const origW = image.width;
+            const origH = image.height;
+            if (maxWidth > 0 && origW > maxWidth) {
+                image = image.thumbnailImage(maxWidth);
+            }
+            const outBuf = image.webpsaveBuffer({ Q: 85 });
+            const result = { buffer: Buffer.from(outBuf), width: image.width, height: image.height, format: "webp" };
+            image.delete();
+            return result;
+        } catch {
+            // Fallback: NativeImage resize + JPEG
+            const electron = require("electron");
+            let image = electron.nativeImage.createFromBuffer(pngBuffer);
+            if (maxWidth > 0) {
+                const size = image.getSize();
+                if (size.width > maxWidth) {
+                    const ratio = maxWidth / size.width;
+                    image = image.resize({ width: Math.round(size.width * ratio), height: Math.round(size.height * ratio) });
+                }
+            }
+            const size = image.getSize();
+            const buffer = image.toJPEG(85);
+            return { buffer, width: size.width, height: size.height, format: "jpeg" };
+        }
+    }
+
+    private async takeScreenshot(savePath?: string, maxWidth?: number): Promise<ToolResult> {
         try {
             const fs = require("fs");
             const path = require("path");
@@ -545,19 +589,28 @@ export class DebugTools implements ToolCategory {
             // Bring to front and wait for render
             win.show();
             await new Promise(r => setTimeout(r, 300));
-            const image = await win.webContents.capturePage();
-            const pngBuffer = image.toPNG();
+            const nativeImage = await win.webContents.capturePage();
+            const originalSize = nativeImage.getSize();
+            const pngBuffer = nativeImage.toPNG();
+
+            const effectiveMaxWidth = maxWidth !== undefined ? maxWidth : 960;
+            const { buffer, width, height, format } = await this.processImage(pngBuffer, effectiveMaxWidth);
 
             // Determine save path
+            const ext = format === "webp" ? "webp" : format === "jpeg" ? "jpg" : "png";
             if (!savePath) {
                 const dir = path.join(Editor.Project.tmpDir, "screenshots");
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-                savePath = path.join(dir, `screenshot_${timestamp}.png`);
+                savePath = path.join(dir, `screenshot_${timestamp}.${ext}`);
             }
 
-            fs.writeFileSync(savePath, pngBuffer);
-            return ok({ success: true, path: savePath, size: pngBuffer.length });
+            fs.writeFileSync(savePath, buffer);
+            return ok({
+                success: true, path: savePath, size: buffer.length, format,
+                originalSize: `${originalSize.width}x${originalSize.height}`,
+                savedSize: `${width}x${height}`,
+            });
         } catch (e: any) {
             return err(e.message || String(e));
         }

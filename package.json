@@ -11,7 +11,8 @@
     "description": "MCP Server for Cocos Creator [f9d31fa30d15]",
     "main": "./dist/main.js",
     "dependencies": {
-        "vue": "^3.1.4"
+        "vue": "^3.1.4",
+        "wasm-vips": "^0.0.17"
     },
     "devDependencies": {
         "@cocos/creator-types": "^3.8.6",
