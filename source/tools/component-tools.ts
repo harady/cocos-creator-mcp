@@ -154,17 +154,42 @@ export class ComponentTools implements ToolCategory {
             // scene:set-property でプロパティ変更（Prefab保存時にも反映される）
             // パス形式: __comps__.{index}.{property}
             const path = `__comps__.${compIndex}.${property}`;
-            const dumpType = typeof value === "number" ? "Number"
-                : typeof value === "boolean" ? "Boolean"
-                : typeof value === "string" ? "String"
-                : undefined;
-            const dump = dumpType ? { value, type: dumpType } : { value };
+            const dump = this.buildDump(value);
 
             const result = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
             return ok({ success: true, path, dump, result });
         } catch (e: any) {
             return err(e.message || String(e));
         }
+    }
+
+    /**
+     * 値からEditorのset-propertyに渡すdumpオブジェクトを構築する。
+     *
+     * - プリミティブ（number, boolean, string）: そのまま {value, type} 形式
+     * - Node/Component参照 {uuid: "xxx"}: {type: "cc.Node", value: {uuid}} 形式
+     *   ※ Editorが自動的にNode上のコンポーネントに解決するため、
+     *     Label/Spriteなどの参照もtype:"cc.Node"でNodeのUUIDを指定すればよい
+     * - その他のオブジェクト: {value} としてそのまま渡す
+     */
+    private buildDump(value: any): any {
+        if (typeof value === "number") return { value, type: "Number" };
+        if (typeof value === "boolean") return { value, type: "Boolean" };
+
+        // Node/Component参照: {uuid: "xxx"} 形式のオブジェクト
+        if (value !== null && typeof value === "object" && typeof value.uuid === "string") {
+            return { type: "cc.Node", value: { uuid: value.uuid } };
+        }
+
+        // 生のUUID文字列（後方互換）: "xxx" 形式の場合もNode参照として扱う
+        // ただし、明らかに通常のテキスト値の場合はString型にする必要がある。
+        // 判定基準: UUIDは通常20文字以上のBase64風文字列
+        if (typeof value === "string") {
+            return { value, type: "String" };
+        }
+
+        // その他のオブジェクト（contentSize等の構造体）
+        return { value };
     }
 
     private async sceneScript(method: string, args: any[]): Promise<any> {
