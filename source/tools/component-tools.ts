@@ -154,17 +154,55 @@ export class ComponentTools implements ToolCategory {
             // scene:set-property でプロパティ変更（Prefab保存時にも反映される）
             // パス形式: __comps__.{index}.{property}
             const path = `__comps__.${compIndex}.${property}`;
-            const dumpType = typeof value === "number" ? "Number"
-                : typeof value === "boolean" ? "Boolean"
-                : typeof value === "string" ? "String"
-                : undefined;
-            const dump = dumpType ? { value, type: dumpType } : { value };
+            const dump = this.buildDump(value);
 
             const result = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
             return ok({ success: true, path, dump, result });
         } catch (e: any) {
             return err(e.message || String(e));
         }
+    }
+
+    /**
+     * 値からEditorのset-propertyに渡すdumpオブジェクトを構築する。
+     *
+     * - プリミティブ（number, boolean, string）: そのまま {value, type} 形式
+     * - Node/Component参照 {uuid: "xxx"}: {type: "cc.Node", value: {uuid}} 形式
+     *   ※ Editorが自動的にNode上のコンポーネントに解決するため、
+     *     Label/Spriteなどの参照もtype:"cc.Node"でNodeのUUIDを指定すればよい
+     * - その他のオブジェクト: {value} としてそのまま渡す
+     */
+    private buildDump(value: any): any {
+        if (typeof value === "number") return { value, type: "Number" };
+        if (typeof value === "boolean") return { value, type: "Boolean" };
+
+        // Node/Asset参照: {uuid: "xxx"} または {uuid: "xxx", type: "cc.SpriteFrame"} 形式
+        // type未指定の場合はcc.Nodeとして扱う（後方互換）
+        // Asset参照（SpriteFrame等）の場合はtypeを明示的に指定する
+        if (value !== null && typeof value === "object" && typeof value.uuid === "string") {
+            const refType = typeof value.type === "string" ? value.type : "cc.Node";
+            return { type: refType, value: { uuid: value.uuid } };
+        }
+
+        // 生のUUID文字列（後方互換）: "xxx" 形式の場合もNode参照として扱う
+        // ただし、明らかに通常のテキスト値の場合はString型にする必要がある。
+        // 判定基準: UUIDは通常20文字以上のBase64風文字列
+        if (typeof value === "string") {
+            return { value, type: "String" };
+        }
+
+        // その他のオブジェクト（contentSize, color等の構造体）
+        // Editor APIはcc.Size/cc.Vec2/cc.Color等の構造体で各フィールドを
+        // {value: 数値} でラップした形式を期待する
+        if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+            const wrapped: any = {};
+            for (const [k, v] of Object.entries(value)) {
+                wrapped[k] = { value: v };
+            }
+            return { value: wrapped };
+        }
+
+        return { value };
     }
 
     private async sceneScript(method: string, args: any[]): Promise<any> {

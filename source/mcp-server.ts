@@ -4,8 +4,8 @@ import { ToolCategory, ToolDefinition, JsonRpcRequest, JsonRpcResponse, ServerCo
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const SESSION_ID = `cocos-mcp-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 
-/** ビルド時に書き換えられるID。npm run build で自動更新 */
-export const BUILD_ID = "__BUILD_ID__";
+/** ビルド時にコードベースのSHA256ハッシュが埋め込まれる */
+export const BUILD_HASH = "__BUILD_HASH__";
 
 // ─── Game Preview Log Buffer ───
 

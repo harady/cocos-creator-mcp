@@ -5,13 +5,14 @@
     "author": "harady",
     "editor": ">=3.8.0",
     "scripts": {
-        "build": "tsc && node -e \"const fs=require('fs');const f='dist/mcp-server.js';const id=new Date().toISOString().replace(/[^0-9]/g,'').substring(0,14);fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace('__BUILD_ID__',id));console.log('BUILD_ID:',id)\"",
+        "build": "tsc && node scripts/postbuild.js",
         "watch": "tsc -w"
     },
-    "description": "i18n:cocos-creator-mcp.description",
+    "description": "MCP Server for Cocos Creator [f9d31fa30d15]",
     "main": "./dist/main.js",
     "dependencies": {
-        "vue": "^3.1.4"
+        "vue": "^3.1.4",
+        "wasm-vips": "^0.0.17"
     },
     "devDependencies": {
         "@cocos/creator-types": "^3.8.6",

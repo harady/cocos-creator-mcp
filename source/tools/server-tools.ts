@@ -1,6 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
-import { BUILD_ID } from "../mcp-server";
+import { BUILD_HASH } from "../mcp-server";
 
 export class ServerTools implements ToolCategory {
     readonly categoryName = "server";
@@ -20,6 +20,11 @@ export class ServerTools implements ToolCategory {
             {
                 name: "server_get_status",
                 description: "Get the editor server status (IP, port, connectivity).",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
+                name: "server_get_build_hash",
+                description: "Get the build hash of the MCP server. The hash is derived from the code content, so identical code always produces the same hash.",
                 inputSchema: { type: "object", properties: {} },
             },
             {
@@ -51,7 +56,10 @@ export class ServerTools implements ToolCategory {
                         (Editor.Message.request as any)("server", "query-ip-list").catch(() => []),
                         (Editor.Message.request as any)("server", "query-port").catch(() => null),
                     ]);
-                    return ok({ success: true, ips, port, buildId: BUILD_ID });
+                    return ok({ success: true, ips, port });
+                }
+                case "server_get_build_hash": {
+                    return ok({ success: true, buildHash: BUILD_HASH });
                 }
                 case "server_check_connectivity": {
                     try {
