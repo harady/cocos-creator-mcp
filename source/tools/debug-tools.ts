@@ -143,6 +143,11 @@ export class DebugTools implements ToolCategory {
                 inputSchema: { type: "object", properties: {} },
             },
             {
+                name: "debug_reload_extension",
+                description: "Reload the MCP extension itself. Use after npm run build to apply code changes without restarting CocosCreator. Response is sent before reload starts.",
+                inputSchema: { type: "object", properties: {} },
+            },
+            {
                 name: "debug_get_extension_info",
                 description: "Get detailed information about a specific extension.",
                 inputSchema: {
@@ -201,6 +206,8 @@ export class DebugTools implements ToolCategory {
                     return this.handlePreview(args.action || "start");
                 case "debug_clear_code_cache":
                     return this.clearCodeCache();
+                case "debug_reload_extension":
+                    return this.reloadExtension();
                 case "debug_validate_scene":
                     return this.validateScene();
                 case "debug_get_extension_info":
@@ -614,6 +621,18 @@ export class DebugTools implements ToolCategory {
         } catch (e: any) {
             return err(e.message || String(e));
         }
+    }
+
+    private async reloadExtension(): Promise<ToolResult> {
+        // Schedule reload after response is sent
+        setTimeout(async () => {
+            try {
+                await (Editor.Message.request as any)("extension", "reload", "cocos-creator-mcp");
+            } catch (e: any) {
+                console.error("[MCP] Extension reload failed:", e.message);
+            }
+        }, 500);
+        return ok({ success: true, note: "Extension reload scheduled. MCP server will restart in ~1s." });
     }
 
     private async validateScene(): Promise<ToolResult> {
