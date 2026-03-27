@@ -176,9 +176,12 @@ export class ComponentTools implements ToolCategory {
         if (typeof value === "number") return { value, type: "Number" };
         if (typeof value === "boolean") return { value, type: "Boolean" };
 
-        // Node/Component参照: {uuid: "xxx"} 形式のオブジェクト
+        // Node/Asset参照: {uuid: "xxx"} または {uuid: "xxx", type: "cc.SpriteFrame"} 形式
+        // type未指定の場合はcc.Nodeとして扱う（後方互換）
+        // Asset参照（SpriteFrame等）の場合はtypeを明示的に指定する
         if (value !== null && typeof value === "object" && typeof value.uuid === "string") {
-            return { type: "cc.Node", value: { uuid: value.uuid } };
+            const refType = typeof value.type === "string" ? value.type : "cc.Node";
+            return { type: refType, value: { uuid: value.uuid } };
         }
 
         // 生のUUID文字列（後方互換）: "xxx" 形式の場合もNode参照として扱う
@@ -188,7 +191,17 @@ export class ComponentTools implements ToolCategory {
             return { value, type: "String" };
         }
 
-        // その他のオブジェクト（contentSize等の構造体）
+        // その他のオブジェクト（contentSize, color等の構造体）
+        // Editor APIはcc.Size/cc.Vec2/cc.Color等の構造体で各フィールドを
+        // {value: 数値} でラップした形式を期待する
+        if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+            const wrapped: any = {};
+            for (const [k, v] of Object.entries(value)) {
+                wrapped[k] = { value: v };
+            }
+            return { value: wrapped };
+        }
+
         return { value };
     }
 
