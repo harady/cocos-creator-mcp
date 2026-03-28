@@ -376,33 +376,12 @@ export class DebugTools implements ToolCategory {
     }
 
     private async startPreview(): Promise<ToolResult> {
-        // 全体を15秒タイムアウトでラップ
-        const result = await Promise.race([
-            this._doStartPreview(),
-            new Promise<ToolResult>(r => setTimeout(() => {
-                // タイムアウトした場合もブラウザプレビューを試みる
-                try {
-                    const electron = require("electron");
-                    electron.shell.openExternal("http://127.0.0.1:7456");
-                } catch {}
-                r(ok({ success: true, action: "start", mode: "browser", note: "editor preview timed out, opened browser" }));
-            }, 15000)),
-        ]);
-        return result;
-    }
-
-    private async _doStartPreview(): Promise<ToolResult> {
         try {
-            // ツールバーのVueインスタンス経由でplay()を呼ぶ（UI状態も同期される）
-            const played = await this.executeOnToolbar("start");
-            if (played) {
-                return ok({ success: true, action: "start", mode: "editor" });
-            }
-
-            // フォールバック: 直接API（fire-and-forget — プレビュー完了を待たない）
+            // Editor Preview APIを fire-and-forget で呼ぶ（完了を待たない）
             (Editor.Message.request as any)("scene", "editor-preview-set-play", true).catch(() => {});
-            return ok({ success: true, action: "start", mode: "editor", note: "preview starting (fire-and-forget)" });
+            return ok({ success: true, action: "start", mode: "editor", note: "preview starting" });
         } catch (e: any) {
+            // フォールバック: ブラウザプレビュー
             try {
                 const electron = require("electron");
                 await electron.shell.openExternal("http://127.0.0.1:7456");
@@ -415,13 +394,7 @@ export class DebugTools implements ToolCategory {
 
     private async stopPreview(): Promise<ToolResult> {
         try {
-            // ツールバー経由で停止（UI同期）
-            const stopped = await this.executeOnToolbar("stop");
-            if (!stopped) {
-                // フォールバック: 直接API（fire-and-forget）
-                (Editor.Message.request as any)("scene", "editor-preview-set-play", false).catch(() => {});
-            }
-            // scene:preview-stop ブロードキャストでツールバーUI状態をリセット
+            (Editor.Message.request as any)("scene", "editor-preview-set-play", false).catch(() => {});
             Editor.Message.broadcast("scene:preview-stop");
             return ok({ success: true, action: "stop" });
         } catch (e: any) {
