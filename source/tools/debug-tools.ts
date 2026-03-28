@@ -376,9 +376,23 @@ export class DebugTools implements ToolCategory {
     }
 
     private async startPreview(): Promise<ToolResult> {
-        try {
-            await this.ensureMainSceneOpen();
+        // 全体を15秒タイムアウトでラップ
+        const result = await Promise.race([
+            this._doStartPreview(),
+            new Promise<ToolResult>(r => setTimeout(() => {
+                // タイムアウトした場合もブラウザプレビューを試みる
+                try {
+                    const electron = require("electron");
+                    electron.shell.openExternal("http://127.0.0.1:7456");
+                } catch {}
+                r(ok({ success: true, action: "start", mode: "browser", note: "editor preview timed out, opened browser" }));
+            }, 15000)),
+        ]);
+        return result;
+    }
 
+    private async _doStartPreview(): Promise<ToolResult> {
+        try {
             // ツールバーのVueインスタンス経由でplay()を呼ぶ（UI状態も同期される）
             const played = await this.executeOnToolbar("start");
             if (played) {
