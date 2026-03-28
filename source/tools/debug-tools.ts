@@ -424,14 +424,15 @@ export class DebugTools implements ToolCategory {
             const allContents = electron.webContents.getAllWebContents();
             for (const wc of allContents) {
                 try {
+                    // play()をawaitしない — プレビュー完了を待つとタイムアウトするため
                     if (action === "start") {
                         const result = await wc.executeJavaScript(
-                            `(async () => { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
+                            `(function() { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`
                         );
                         if (result) return true;
                     } else {
                         const result = await wc.executeJavaScript(
-                            `(async () => { if (window.xxx && window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
+                            `(function() { if (window.xxx && window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`
                         );
                         if (result) return true;
                     }

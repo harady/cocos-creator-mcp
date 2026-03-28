@@ -45,16 +45,28 @@ export class ComponentTools implements ToolCategory {
             },
             {
                 name: "component_set_property",
-                description: "Set a property on a component. Examples: Label.string, Label.fontSize, Sprite.color, UITransform.contentSize.",
+                description: "Set one or more properties on a component. For single: use property+value. For batch: use properties array. Examples: Label.string, Label.fontSize, Sprite.color, UITransform.contentSize.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         uuid: { type: "string", description: "Node UUID" },
                         componentType: { type: "string", description: "Component class name (e.g. 'cc.Label')" },
-                        property: { type: "string", description: "Property name (e.g. 'string', 'fontSize')" },
-                        value: { description: "Value to set" },
+                        property: { type: "string", description: "Property name (single mode)" },
+                        value: { description: "Value to set (single mode)" },
+                        properties: {
+                            type: "array",
+                            description: "Batch mode: array of {property, value} objects to set multiple properties at once",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    property: { type: "string", description: "Property name" },
+                                    value: { description: "Value to set" },
+                                },
+                                required: ["property", "value"],
+                            },
+                        },
                     },
-                    required: ["uuid", "componentType", "property", "value"],
+                    required: ["uuid", "componentType"],
                 },
             },
             {
@@ -87,6 +99,9 @@ export class ComponentTools implements ToolCategory {
             case "component_get_components":
                 return this.getComponents(args.uuid);
             case "component_set_property":
+                if (args.properties && Array.isArray(args.properties)) {
+                    return this.setProperties(args.uuid, compType, args.properties);
+                }
                 return this.setProperty(args.uuid, compType, args.property, args.value);
             case "component_get_info": {
                 try {
@@ -160,6 +175,37 @@ export class ComponentTools implements ToolCategory {
 
             const result = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
             return ok({ success: true, path, dump, result });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async setProperties(uuid: string, componentType: string, properties: Array<{property: string, value: any}>): Promise<ToolResult> {
+        try {
+            if (!componentType) return err("componentType is required");
+            if (!properties.length) return err("properties array is empty");
+
+            // コンポーネントのインデックスを取得（1回だけ）
+            const nodeInfo = await this.sceneScript("getNodeInfo", [uuid]);
+            if (!nodeInfo?.success || !nodeInfo?.data?.components) {
+                return err(`Node ${uuid} not found or has no components`);
+            }
+            const compName = componentType.replace("cc.", "");
+            const compIndex = nodeInfo.data.components.findIndex((c: any) => c.type === compName);
+            if (compIndex < 0) {
+                return err(`Component ${componentType} not found on node ${uuid}`);
+            }
+
+            const results: any[] = [];
+            for (const { property, value } of properties) {
+                const path = `__comps__.${compIndex}.${property}`;
+                const dump = await this.buildDumpWithTypeInfo(uuid, path, value);
+                const result = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
+                results.push({ property, success: result?.success !== false, path });
+            }
+
+            const allOk = results.every(r => r.success);
+            return ok({ success: allOk, results });
         } catch (e: any) {
             return err(e.message || String(e));
         }
