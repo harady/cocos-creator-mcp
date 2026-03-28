@@ -74,6 +74,65 @@ function findNode(uuid: string) {
     return null;
 }
 
+/**
+ * Recursively build a node tree from a JSON spec.
+ * Returns { uuid, name, children: [...] }
+ */
+function buildNodeRecursive(parent: any, spec: any): any {
+    const { Node, js, Vec3 } = require("cc");
+
+    const node = new Node(spec.name || "Node");
+    parent.addChild(node);
+
+    // Add components
+    if (spec.components && Array.isArray(spec.components)) {
+        for (const compName of spec.components) {
+            const CompClass = js.getClassByName(compName);
+            if (CompClass) {
+                // Skip if already has this component (e.g. UITransform on UI nodes)
+                if (!node.getComponent(CompClass)) {
+                    node.addComponent(CompClass);
+                }
+            }
+        }
+    }
+
+    // Set component properties
+    // Format: { "cc.UITransform.contentSize": {width:720, height:1280} }
+    if (spec.properties) {
+        for (const [key, value] of Object.entries(spec.properties)) {
+            const dotIdx = key.lastIndexOf(".");
+            if (dotIdx < 0) continue;
+            const compName = key.substring(0, dotIdx);
+            const propName = key.substring(dotIdx + 1);
+
+            const CompClass = js.getClassByName(compName);
+            if (!CompClass) continue;
+            const comp = node.getComponent(CompClass);
+            if (!comp) continue;
+
+            try {
+                comp[propName] = value;
+            } catch { /* skip invalid property */ }
+        }
+    }
+
+    // Set node properties (position, scale, active)
+    if (spec.active === false) node.active = false;
+    if (spec.position) node.setPosition(spec.position.x || 0, spec.position.y || 0, spec.position.z || 0);
+    if (spec.scale) node.setScale(spec.scale.x ?? 1, spec.scale.y ?? 1, spec.scale.z ?? 1);
+
+    // Build children
+    const childResults: any[] = [];
+    if (spec.children && Array.isArray(spec.children)) {
+        for (const childSpec of spec.children) {
+            childResults.push(buildNodeRecursive(node, childSpec));
+        }
+    }
+
+    return { uuid: node.uuid, name: node.name, children: childResults };
+}
+
 function collectNodeInfo(node: any, includeComponents: boolean = false): any {
     const info: any = {
         uuid: node.uuid,
@@ -253,9 +312,33 @@ export const methods: Record<string, (...args: any[]) => any> = {
         }
     },
 
+    /**
+     * Build a node tree from a JSON spec in one call.
+     * Spec format:
+     * {
+     *   name: string,
+     *   components?: string[],            // e.g. ["cc.UITransform", "cc.Layout"]
+     *   properties?: Record<string, any>, // e.g. { "cc.UITransform.contentSize": {width:720,height:1280} }
+     *   children?: NodeSpec[]
+     * }
+     */
+    buildNodeTree(parentUuid: string, spec: any) {
+        try {
+            const { Node, js, UITransform } = require("cc");
+            const parent = findNode(parentUuid);
+            if (!parent) return { success: false, error: `Parent ${parentUuid} not found` };
+
+            const result = buildNodeRecursive(parent, spec);
+            return { success: true, data: result };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    },
+
     testLog(message: string = "test message") {
         console.log("[testLog]", message);
-        return { success: true, bufferSize: _consoleLogs.length };
+        const methods = Object.keys(exports.methods || {});
+        return { success: true, bufferSize: _consoleLogs.length, methods };
     },
 
     getConsoleLogs(count: number = 50, level?: string) {

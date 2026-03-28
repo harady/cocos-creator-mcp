@@ -163,6 +163,18 @@ export class NodeTools implements ToolCategory {
                     required: ["uuid"],
                 },
             },
+            {
+                name: "node_create_tree",
+                description: "Create a full node tree from a JSON spec in one call. Much faster than creating nodes one by one. Spec format: { name, components?: ['cc.UITransform'], properties?: {'cc.UITransform.contentSize': {width:720,height:1280}}, active?: bool, position?: {x,y,z}, children?: [...] }",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        parent: { type: "string", description: "Parent node UUID" },
+                        spec: { description: "Node tree specification (JSON object with name, components, properties, children)" },
+                    },
+                    required: ["parent", "spec"],
+                },
+            },
         ];
     }
 
@@ -190,6 +202,8 @@ export class NodeTools implements ToolCategory {
                 return this.setProperty(args.uuid, "active", args.active);
             case "node_set_layer":
                 return this.setProperty(args.uuid, "layer", args.layer);
+            case "node_create_tree":
+                return this.createNodeTree(args.parent, args.spec);
             case "node_detect_type": {
                 try {
                     const info = await this.sceneScript("getNodeInfo", [args.uuid]);
@@ -247,6 +261,16 @@ export class NodeTools implements ToolCategory {
             await new Promise(resolve => setTimeout(resolve, intervalMs));
         }
         // Don't throw — let the caller proceed and get a more specific error if needed
+    }
+
+    private async createNodeTree(parentUuid: string, spec: any): Promise<ToolResult> {
+        try {
+            const result = await this.sceneScript("buildNodeTree", [parentUuid, spec]);
+            if (!result?.success) return err(result?.error || "buildNodeTree failed");
+            return ok(result);
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
     }
 
     private async getNodeInfo(uuid: string): Promise<ToolResult> {
