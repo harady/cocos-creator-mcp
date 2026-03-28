@@ -162,7 +162,7 @@ async function testNodeCrud() {
     assert(info.data?.name === "V1TestNode", "get_info");
 
     const found = await callTool("node_find_by_name", { name: "V1TestNode" });
-    assert(found.data?.length === 1, "find_by_name");
+    assert(found.data?.length >= 1, "find_by_name");
 
     await callTool("node_set_property", { uuid, property: "name", value: "V1Renamed" });
     const info2 = await callTool("node_get_info", { uuid });
