@@ -377,11 +377,18 @@ export class DebugTools implements ToolCategory {
 
     private async startPreview(): Promise<ToolResult> {
         try {
-            // Editor Preview APIを fire-and-forget で呼ぶ（完了を待たない）
+            // ツールバー経由でplay()（UI同期あり）— 全体10秒タイムアウト
+            const played = await Promise.race([
+                this.executeOnToolbar("start"),
+                new Promise<false>(r => setTimeout(() => r(false), 10000)),
+            ]);
+            if (played) {
+                return ok({ success: true, action: "start", mode: "editor" });
+            }
+            // フォールバック: 直接API（fire-and-forget）
             (Editor.Message.request as any)("scene", "editor-preview-set-play", true).catch(() => {});
-            return ok({ success: true, action: "start", mode: "editor", note: "preview starting" });
+            return ok({ success: true, action: "start", mode: "editor", note: "toolbar failed, using direct API" });
         } catch (e: any) {
-            // フォールバック: ブラウザプレビュー
             try {
                 const electron = require("electron");
                 await electron.shell.openExternal("http://127.0.0.1:7456");
@@ -394,7 +401,13 @@ export class DebugTools implements ToolCategory {
 
     private async stopPreview(): Promise<ToolResult> {
         try {
-            (Editor.Message.request as any)("scene", "editor-preview-set-play", false).catch(() => {});
+            const stopped = await Promise.race([
+                this.executeOnToolbar("stop"),
+                new Promise<false>(r => setTimeout(() => r(false), 10000)),
+            ]);
+            if (!stopped) {
+                (Editor.Message.request as any)("scene", "editor-preview-set-play", false).catch(() => {});
+            }
             Editor.Message.broadcast("scene:preview-stop");
             return ok({ success: true, action: "stop" });
         } catch (e: any) {
