@@ -154,7 +154,9 @@ export class ComponentTools implements ToolCategory {
             // scene:set-property でプロパティ変更（Prefab保存時にも反映される）
             // パス形式: __comps__.{index}.{property}
             const path = `__comps__.${compIndex}.${property}`;
-            const dump = this.buildDump(value);
+
+            // プロパティの型情報をquery-nodeから取得して、適切なdump形式を構築
+            const dump = await this.buildDumpWithTypeInfo(uuid, path, value);
 
             const result = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
             return ok({ success: true, path, dump, result });
@@ -164,36 +166,52 @@ export class ComponentTools implements ToolCategory {
     }
 
     /**
-     * 値からEditorのset-propertyに渡すdumpオブジェクトを構築する。
+     * プロパティの型情報をEditor APIから取得し、適切なdump形式を構築する。
      *
-     * - プリミティブ（number, boolean, string）: そのまま {value, type} 形式
-     * - Node/Component参照 {uuid: "xxx"}: {type: "cc.Node", value: {uuid}} 形式
-     *   ※ Editorが自動的にNode上のコンポーネントに解決するため、
-     *     Label/Spriteなどの参照もtype:"cc.Node"でNodeのUUIDを指定すればよい
-     * - その他のオブジェクト: {value} としてそのまま渡す
+     * UUID文字列が渡された場合、プロパティの型に応じて:
+     * - Node/Component参照型 → {type: propType, value: {uuid: nodeUuid}}
+     * - Asset参照型（cc.Prefab等） → {type: propType, value: {uuid: assetUuid}}
+     * - String型 → {value, type: "String"}
      */
-    private buildDump(value: any): any {
+    private async buildDumpWithTypeInfo(nodeUuid: string, path: string, value: any): Promise<any> {
+        // プリミティブ型はそのまま
         if (typeof value === "number") return { value, type: "Number" };
         if (typeof value === "boolean") return { value, type: "Boolean" };
 
-        // Node/Asset参照: {uuid: "xxx"} または {uuid: "xxx", type: "cc.SpriteFrame"} 形式
-        // type未指定の場合はcc.Nodeとして扱う（後方互換）
-        // Asset参照（SpriteFrame等）の場合はtypeを明示的に指定する
+        // オブジェクト形式 {uuid: "xxx", type: "cc.Node"} はそのまま
         if (value !== null && typeof value === "object" && typeof value.uuid === "string") {
             const refType = typeof value.type === "string" ? value.type : "cc.Node";
             return { type: refType, value: { uuid: value.uuid } };
         }
 
-        // 生のUUID文字列（後方互換）: "xxx" 形式の場合もNode参照として扱う
-        // ただし、明らかに通常のテキスト値の場合はString型にする必要がある。
-        // 判定基準: UUIDは通常20文字以上のBase64風文字列
+        // 文字列の場合: プロパティの型情報を取得して判定
         if (typeof value === "string") {
+            try {
+                const nodeDump = await (Editor.Message.request as any)("scene", "query-node", nodeUuid);
+                if (nodeDump) {
+                    const propDump = this.resolveDumpPath(nodeDump, path);
+                    if (propDump?.type) {
+                        const propType = propDump.type as string;
+                        const extendsArr = (propDump.extends || []) as string[];
+                        // Node/Component参照型: cc.Nodeを継承するもの
+                        const isNodeRef = propType === "cc.Node" ||
+                            extendsArr.includes("cc.Component") ||
+                            extendsArr.includes("cc.Object");
+                        // Asset参照型: cc.Assetを継承するもの（cc.Prefab, cc.SpriteFrame等）
+                        const isAssetRef = extendsArr.includes("cc.Asset");
+
+                        if (isNodeRef || isAssetRef) {
+                            return { type: propType, value: { uuid: value } };
+                        }
+                    }
+                }
+            } catch (_e) {
+                // query-node失敗時はフォールバック
+            }
             return { value, type: "String" };
         }
 
         // その他のオブジェクト（contentSize, color等の構造体）
-        // Editor APIはcc.Size/cc.Vec2/cc.Color等の構造体で各フィールドを
-        // {value: 数値} でラップした形式を期待する
         if (value !== null && typeof value === "object" && !Array.isArray(value)) {
             const wrapped: any = {};
             for (const [k, v] of Object.entries(value)) {
@@ -203,6 +221,26 @@ export class ComponentTools implements ToolCategory {
         }
 
         return { value };
+    }
+
+    /**
+     * query-nodeのdumpからドットパスでプロパティを解決する。
+     * 例: "__comps__.2.scrollView" → nodeDump.__comps__[2].value.scrollView
+     */
+    private resolveDumpPath(nodeDump: any, path: string): any {
+        const parts = path.split(".");
+        let current = nodeDump;
+        for (const part of parts) {
+            if (!current) return null;
+            if (part === "__comps__") {
+                current = current.__comps__;
+            } else if (/^\d+$/.test(part)) {
+                current = current[parseInt(part)]?.value;
+            } else {
+                current = current?.[part];
+            }
+        }
+        return current;
     }
 
     private async sceneScript(method: string, args: any[]): Promise<any> {
