@@ -356,7 +356,8 @@ async function testServerTools() {
     console.log("\n── server tools ──");
     const status = await callTool("server_get_status");
     assert(status.success === true, "get_status");
-    assert(!!status.buildId && status.buildId !== "__BUILD_ID__", `buildId: ${status.buildId}`);
+    const buildInfo = await callTool("server_get_build_hash");
+    assert(!!buildInfo.buildHash && buildInfo.buildHash !== "__BUILD_HASH__", `buildHash: ${buildInfo.buildHash}`);
 
     const port = await callTool("server_query_port");
     assert(port.success === true, "query_port");
