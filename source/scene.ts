@@ -117,6 +117,13 @@ function buildNodeRecursive(parent: any, spec: any): any {
         }
     }
 
+    // Set UITransform anchorPoint if specified
+    if (spec.anchorPoint) {
+        const { UITransform } = require("cc");
+        const ut = node.getComponent(UITransform);
+        if (ut) ut.setAnchorPoint(spec.anchorPoint.x ?? 0.5, spec.anchorPoint.y ?? 0.5);
+    }
+
     // Set node properties (position, scale, active)
     if (spec.active === false) node.active = false;
     if (spec.position) node.setPosition(spec.position.x || 0, spec.position.y || 0, spec.position.z || 0);
