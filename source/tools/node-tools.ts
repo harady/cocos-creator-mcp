@@ -179,6 +179,9 @@ export class NodeTools implements ToolCategory {
     }
 
     async execute(toolName: string, args: Record<string, any>): Promise<ToolResult> {
+        const rejected = await this.rejectIfPreviewRunning(toolName);
+        if (rejected) return rejected;
+
         switch (toolName) {
             case "node_create":
                 return this.createNode(args.name, args.parent, args.components);
@@ -219,6 +222,24 @@ export class NodeTools implements ToolCategory {
             default:
                 return err(`Unknown tool: ${toolName}`);
         }
+    }
+
+    /** Scene editing tools that must not run during preview */
+    private static readonly SCENE_EDIT_TOOLS = new Set([
+        "node_create", "node_delete", "node_move", "node_duplicate",
+        "node_set_property", "node_set_transform", "node_set_active", "node_set_layer",
+        "node_create_tree",
+    ]);
+
+    private async rejectIfPreviewRunning(toolName: string): Promise<ToolResult | null> {
+        if (!NodeTools.SCENE_EDIT_TOOLS.has(toolName)) return null;
+        try {
+            const state = await Editor.Message.request("preview", "query-info");
+            if (state && (state as any).running) {
+                return err(`"${toolName}" はプレビュー中に実行できません。先にプレビューを停止してください。`);
+            }
+        } catch { /* query failed — allow execution */ }
+        return null;
     }
 
     private async createNode(name: string, parent?: string, components?: string[]): Promise<ToolResult> {
