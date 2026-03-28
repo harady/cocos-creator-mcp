@@ -385,9 +385,9 @@ export class DebugTools implements ToolCategory {
                 return ok({ success: true, action: "start", mode: "editor" });
             }
 
-            // フォールバック: 直接API
-            const isPlaying = await (Editor.Message.request as any)("scene", "editor-preview-set-play", true);
-            return ok({ success: true, isPlaying, action: "start", mode: "editor", note: "direct API (toolbar UI may not sync)" });
+            // フォールバック: 直接API（fire-and-forget — プレビュー完了を待たない）
+            (Editor.Message.request as any)("scene", "editor-preview-set-play", true).catch(() => {});
+            return ok({ success: true, action: "start", mode: "editor", note: "preview starting (fire-and-forget)" });
         } catch (e: any) {
             try {
                 const electron = require("electron");
@@ -404,14 +404,11 @@ export class DebugTools implements ToolCategory {
             // ツールバー経由で停止（UI同期）
             const stopped = await this.executeOnToolbar("stop");
             if (!stopped) {
-                // フォールバック: 直接API
-                await (Editor.Message.request as any)("scene", "editor-preview-set-play", false);
+                // フォールバック: 直接API（fire-and-forget）
+                (Editor.Message.request as any)("scene", "editor-preview-set-play", false).catch(() => {});
             }
             // scene:preview-stop ブロードキャストでツールバーUI状態をリセット
             Editor.Message.broadcast("scene:preview-stop");
-            // シーンビューに戻す
-            await new Promise(r => setTimeout(r, 500));
-            await this.ensureMainSceneOpen();
             return ok({ success: true, action: "stop" });
         } catch (e: any) {
             return err(e.message || String(e));
