@@ -65,8 +65,9 @@ const ALL_TOOLS = [
     "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
     "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
     "node_set_property", "node_set_transform",
-    "prefab_create", "prefab_duplicate", "prefab_get_info", "prefab_instantiate",
-    "prefab_list", "prefab_revert", "prefab_update", "prefab_validate",
+    "prefab_close", "prefab_create", "prefab_create_and_replace", "prefab_duplicate",
+    "prefab_get_info", "prefab_instantiate",
+    "prefab_list", "prefab_open", "prefab_revert", "prefab_update", "prefab_validate",
     "preferences_get", "preferences_get_all", "preferences_reset", "preferences_set",
     "project_find_asset", "project_get_asset_info", "project_get_engine_info",
     "project_get_info", "project_get_settings", "project_query_scripts",
@@ -103,7 +104,7 @@ async function testHealth() {
     const res = await fetch(`${BASE}/health`);
     const data = await res.json();
     assert(data.status === "ok", "health status ok");
-    assert(data.tools >= 145, `tool count >= 145 (got ${data.tools})`);
+    assert(data.tools >= 148, `tool count >= 148 (got ${data.tools})`);
 }
 
 async function testInitialize() {
@@ -126,7 +127,7 @@ async function testToolsList() {
     console.log("\n── tools/list ──");
     const res = await callMcp("tools/list", {});
     const tools = res.result?.tools || [];
-    assert(tools.length >= 145, `tool count >= 145 (got ${tools.length})`);
+    assert(tools.length >= 148, `tool count >= 148 (got ${tools.length})`);
 
     const names = tools.map((t) => t.name);
     for (const name of ALL_TOOLS) {
@@ -274,22 +275,31 @@ async function testProjectTools() {
 
 async function testAssetTools() {
     console.log("\n── asset tools ──");
-    // query_uuid
-    const quuid = await callTool("asset_query_uuid", { path: "db://assets/MainScene.scene" });
-    assert(quuid.success === true, "query_uuid");
+    // Find any scene asset dynamically (project-independent)
+    const scenes = await callTool("project_find_asset", { pattern: "db://assets/**/*.scene" });
+    const scenePath = scenes.assets?.[0]?.path || scenes.assets?.[0]?.url;
+    const sceneUuid = scenes.assets?.[0]?.uuid;
 
-    if (quuid.uuid) {
-        const qpath = await callTool("asset_query_path", { uuid: quuid.uuid });
-        assert(qpath.success === true, "query_path");
+    if (scenePath) {
+        const quuid = await callTool("asset_query_uuid", { path: scenePath });
+        assert(quuid.success === true, "query_uuid");
 
-        const qurl = await callTool("asset_query_url", { uuid: quuid.uuid });
-        assert(qurl.success === true, "query_url");
+        const uuid = quuid.uuid || sceneUuid;
+        if (uuid) {
+            const qpath = await callTool("asset_query_path", { uuid });
+            assert(qpath.success === true, "query_path");
 
-        const details = await callTool("asset_get_details", { uuid: quuid.uuid });
-        assert(details.success === true, "get_details");
+            const qurl = await callTool("asset_query_url", { uuid });
+            assert(qurl.success === true, "query_url");
 
-        const deps = await callTool("asset_get_dependencies", { uuid: quuid.uuid });
-        assert(deps.success === true || !deps._rpcError, "get_dependencies");
+            const details = await callTool("asset_get_details", { uuid });
+            assert(details.success === true, "get_details");
+
+            const deps = await callTool("asset_get_dependencies", { uuid });
+            assert(deps.success === true || !deps._rpcError, "get_dependencies");
+        }
+    } else {
+        skip("asset tools (no scene found in project)");
     }
 }
 
@@ -435,43 +445,42 @@ async function testV13Regressions() {
     const save = await callTool("scene_save");
     assert(save.success === true, "scene_save no dialog");
 
-    // 2. prefab_create 上書きガード — 既存Prefabに対してエラーを返すか
-    // UnitIcon.prefab が存在するはずなのでそれを使う
-    const guardResult = await callTool("prefab_create", {
-        uuid: "dummy",
-        path: "db://assets/game/views/CommonParts/UnitIcon.prefab"
-    });
+    // 2. prefab_create 上書きガード — テスト用Prefabを作って上書きを試みる
+    const guardNode = await callTool("node_create", { name: "GuardTest", parent: canvasUuid });
+    const guardPath = `db://assets/test/GuardTest_${Date.now()}.prefab`;
+    const guardPrefab = await callTool("prefab_create", { uuid: guardNode.uuid, path: guardPath });
+    assert(guardPrefab.success === true, "prefab_create for guard test");
+    // 同じパスに再作成 → エラーになるはず
+    const guardResult = await callTool("prefab_create", { uuid: guardNode.uuid, path: guardPath });
     assert(!!guardResult.error || !!guardResult._rpcError, "prefab_create overwrite guard");
+    await callTool("node_delete", { uuid: guardNode.uuid });
+    await callTool("asset_delete", { path: guardPath });
 
-    // 3. set-property + prefab_update — 既存Prefabインスタンスでテスト
-    const existingPrefabs = await callTool("prefab_list");
-    const unitIconPrefab = existingPrefabs.prefabs?.find(p => p.name === "UnitIcon.prefab");
-    if (unitIconPrefab) {
-        const inst = await callTool("prefab_instantiate", { prefabUuid: unitIconPrefab.uuid, parent: canvasUuid });
+    // 3. set-property + prefab_update — テスト用Prefabを自作してテスト
+    const prefabNode = await callTool("node_create", { name: "UpdateTestNode", parent: canvasUuid, components: ["cc.Label"] });
+    await callTool("component_set_property", { uuid: prefabNode.uuid, componentType: "cc.Label", property: "string", value: "original" });
+    const testPrefabPath = `db://assets/test/UpdateTest_${Date.now()}.prefab`;
+    const created = await callTool("prefab_create", { uuid: prefabNode.uuid, path: testPrefabPath });
+    await callTool("node_delete", { uuid: prefabNode.uuid });
+
+    if (created.result) {
+        // instantiate → set-property → prefab_update
+        const inst = await callTool("prefab_instantiate", { prefabUuid: created.result, parent: canvasUuid });
         const instUuid = inst.nodeUuid;
-
-        // LevelLabel子ノードを探す
-        const labelNode = await callTool("node_find_by_name", { name: "LevelLabel" });
-        const labelInInst = labelNode.data?.find(n => n.parent === instUuid);
-
-        if (labelInInst) {
-            // set-propertyでfontSize変更
+        if (instUuid) {
             const setProp = await callTool("component_set_property", {
-                uuid: labelInInst.uuid, componentType: "cc.Label", property: "fontSize", value: 48
+                uuid: instUuid, componentType: "cc.Label", property: "fontSize", value: 48
             });
             assert(setProp.success === true, "set-property fontSize via scene:set-property");
 
-            // prefab_updateで保存
             const updated = await callTool("prefab_update", { uuid: instUuid });
             assert(updated.success === true, "prefab_update after set-property");
-        } else {
-            skip("set-property test (LevelLabel not found in instance)");
-        }
 
-        // クリーンアップ
-        await callTool("node_delete", { uuid: instUuid });
+            await callTool("node_delete", { uuid: instUuid });
+        }
+        await callTool("asset_delete", { path: testPrefabPath });
     } else {
-        skip("set-property + prefab_update (UnitIcon.prefab not found)");
+        skip("set-property + prefab_update (prefab_create failed)");
     }
 
     // 4. パラメータエイリアス — component でも componentType でも動くか
@@ -533,6 +542,60 @@ async function testNewEditorAPIs() {
     }
 }
 
+async function testV15NewTools() {
+    console.log("\n── v1.5 new tools (create_and_replace / batch set_property / prefab_open) ──");
+
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+
+    // 1. prefab_create_and_replace
+    const node = await callTool("node_create", { name: "ReplaceTest", parent: canvasUuid, components: ["cc.Label"] });
+    await callTool("component_set_property", { uuid: node.uuid, componentType: "cc.Label", property: "string", value: "replace_test" });
+    const replacePath = `db://assets/test/ReplaceTest_${Date.now()}.prefab`;
+    const replaced = await callTool("prefab_create_and_replace", { uuid: node.uuid, path: replacePath });
+    assert(replaced.success === true, "prefab_create_and_replace success");
+    assert(!!replaced.prefabAssetUuid, "prefab_create_and_replace returns prefabAssetUuid");
+    assert(!!replaced.newInstanceUuid, "prefab_create_and_replace returns newInstanceUuid");
+
+    // Verify original node is gone
+    const oldNode = await callTool("node_get_info", { uuid: node.uuid });
+    assert(!oldNode.data || oldNode.success === false, "original node removed");
+
+    // Verify new instance exists
+    if (replaced.newInstanceUuid) {
+        const newNode = await callTool("node_get_info", { uuid: replaced.newInstanceUuid });
+        assert(newNode.data?.name === "ReplaceTest", "new instance has correct name");
+        await callTool("node_delete", { uuid: replaced.newInstanceUuid });
+    }
+    await callTool("asset_delete", { path: replacePath });
+
+    // 2. component_set_property batch mode
+    const batchNode = await callTool("node_create", { name: "BatchTest", parent: canvasUuid, components: ["cc.Label"] });
+    const batchResult = await callTool("component_set_property", {
+        uuid: batchNode.uuid,
+        componentType: "cc.Label",
+        properties: [
+            { property: "string", value: "batch_test" },
+            { property: "fontSize", value: 72 },
+        ],
+    });
+    assert(batchResult.success === true, "batch set_property success");
+    assert(batchResult.results?.length === 2, "batch set_property 2 results");
+    await callTool("node_delete", { uuid: batchNode.uuid });
+
+    // 3. prefab_create_and_replace overwrite guard
+    const guardNode2 = await callTool("node_create", { name: "ReplaceGuard", parent: canvasUuid });
+    const guardPath2 = `db://assets/test/ReplaceGuard_${Date.now()}.prefab`;
+    // First create (should succeed via normal create)
+    const firstPrefab = await callTool("prefab_create", { uuid: guardNode2.uuid, path: guardPath2 });
+    assert(firstPrefab.success === true, "first prefab create for replace guard");
+    // Try create_and_replace with same path (should fail)
+    const guardReplace = await callTool("prefab_create_and_replace", { uuid: guardNode2.uuid, path: guardPath2 });
+    assert(!!guardReplace.error || !!guardReplace._rpcError, "create_and_replace overwrite guard");
+    await callTool("node_delete", { uuid: guardNode2.uuid });
+    await callTool("asset_delete", { path: guardPath2 });
+}
+
 // ── runner ──
 
 async function main() {
@@ -567,6 +630,7 @@ async function main() {
     await testProjectAdvanced();
     await testReferenceImageTools();
     await testV13Regressions();
+    await testV15NewTools();
     await testNewEditorAPIs();
 
     console.log(`\n${"═".repeat(40)}`);
