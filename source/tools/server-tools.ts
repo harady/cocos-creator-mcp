@@ -56,7 +56,7 @@ export class ServerTools implements ToolCategory {
                         (Editor.Message.request as any)("server", "query-ip-list").catch(() => []),
                         (Editor.Message.request as any)("server", "query-port").catch(() => null),
                     ]);
-                    return ok({ success: true, ips, port });
+                    return ok({ success: true, ips, port, buildId: BUILD_HASH });
                 }
                 case "server_get_build_hash": {
                     return ok({ success: true, buildHash: BUILD_HASH });
