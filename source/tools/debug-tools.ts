@@ -377,17 +377,17 @@ export class DebugTools implements ToolCategory {
 
     private async startPreview(): Promise<ToolResult> {
         try {
-            // ツールバー経由でplay()（UI同期あり）— 全体10秒タイムアウト
-            const played = await Promise.race([
-                this.executeOnToolbar("start"),
-                new Promise<false>(r => setTimeout(() => r(false), 10000)),
-            ]);
+            await this.ensureMainSceneOpen();
+
+            // ツールバーのVueインスタンス経由でplay()を呼ぶ（UI状態も同期される）
+            const played = await this.executeOnToolbar("start");
             if (played) {
                 return ok({ success: true, action: "start", mode: "editor" });
             }
-            // フォールバック: 直接API（fire-and-forget）
-            (Editor.Message.request as any)("scene", "editor-preview-set-play", true).catch(() => {});
-            return ok({ success: true, action: "start", mode: "editor", note: "toolbar failed, using direct API" });
+
+            // フォールバック: 直接API
+            const isPlaying = await (Editor.Message.request as any)("scene", "editor-preview-set-play", true);
+            return ok({ success: true, isPlaying, action: "start", mode: "editor", note: "direct API (toolbar UI may not sync)" });
         } catch (e: any) {
             try {
                 const electron = require("electron");
@@ -401,14 +401,17 @@ export class DebugTools implements ToolCategory {
 
     private async stopPreview(): Promise<ToolResult> {
         try {
-            const stopped = await Promise.race([
-                this.executeOnToolbar("stop"),
-                new Promise<false>(r => setTimeout(() => r(false), 10000)),
-            ]);
+            // ツールバー経由で停止（UI同期）
+            const stopped = await this.executeOnToolbar("stop");
             if (!stopped) {
-                (Editor.Message.request as any)("scene", "editor-preview-set-play", false).catch(() => {});
+                // フォールバック: 直接API
+                await (Editor.Message.request as any)("scene", "editor-preview-set-play", false);
             }
+            // scene:preview-stop ブロードキャストでツールバーUI状態をリセット
             Editor.Message.broadcast("scene:preview-stop");
+            // シーンビューに戻す
+            await new Promise(r => setTimeout(r, 500));
+            await this.ensureMainSceneOpen();
             return ok({ success: true, action: "stop" });
         } catch (e: any) {
             return err(e.message || String(e));
@@ -416,31 +419,25 @@ export class DebugTools implements ToolCategory {
     }
 
     private async executeOnToolbar(action: "start" | "stop"): Promise<boolean> {
-        // 全体5秒タイムアウト（webContentsが多い場合の保険）
-        return Promise.race([
-            this._tryExecuteOnToolbar(action),
-            new Promise<false>(r => setTimeout(() => r(false), 5000)),
-        ]);
-    }
-
-    private async _tryExecuteOnToolbar(action: "start" | "stop"): Promise<boolean> {
         try {
             const electron = require("electron");
             const allContents = electron.webContents.getAllWebContents();
-            const script = action === "start"
-                ? `(function() { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`
-                : `(function() { if (window.xxx && window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`;
-
-            // 全webContentsに並列で試行（直列だとタイムアウトしやすい）
-            const results = await Promise.allSettled(
-                allContents.map((wc: any) =>
-                    Promise.race([
-                        wc.executeJavaScript(script),
-                        new Promise<false>(r => setTimeout(() => r(false), 2000)),
-                    ]).catch(() => false)
-                )
-            );
-            return results.some(r => r.status === "fulfilled" && r.value === true);
+            for (const wc of allContents) {
+                try {
+                    // play()をawaitしない — プレビュー完了を待つとタイムアウトするため
+                    if (action === "start") {
+                        const result = await wc.executeJavaScript(
+                            `(function() { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`
+                        );
+                        if (result) return true;
+                    } else {
+                        const result = await wc.executeJavaScript(
+                            `(function() { if (window.xxx && window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`
+                        );
+                        if (result) return true;
+                    }
+                } catch { /* not the toolbar webContents */ }
+            }
         } catch { /* electron API not available */ }
         return false;
     }
