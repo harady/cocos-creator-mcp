@@ -248,6 +248,11 @@ async function testPrefabTools() {
     }
 
     await callTool("node_delete", { uuid });
+
+    // テスト用Prefabアセットを削除
+    if (testPrefabPath) {
+        await callTool("asset_delete", { path: testPrefabPath });
+    }
 }
 
 async function testProjectTools() {
