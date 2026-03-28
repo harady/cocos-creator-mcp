@@ -422,19 +422,18 @@ export class DebugTools implements ToolCategory {
         try {
             const electron = require("electron");
             const allContents = electron.webContents.getAllWebContents();
+            const script = action === "start"
+                ? `(async () => { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
+                : `(async () => { if (window.xxx && window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`;
+
             for (const wc of allContents) {
                 try {
-                    if (action === "start") {
-                        const result = await wc.executeJavaScript(
-                            `(async () => { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
-                        );
-                        if (result) return true;
-                    } else {
-                        const result = await wc.executeJavaScript(
-                            `(async () => { if (window.xxx && window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
-                        );
-                        if (result) return true;
-                    }
+                    // 各webContentsに3秒タイムアウトを設定（ハング防止）
+                    const result = await Promise.race([
+                        wc.executeJavaScript(script),
+                        new Promise<false>(r => setTimeout(() => r(false), 3000)),
+                    ]);
+                    if (result) return true;
                 } catch { /* not the toolbar webContents */ }
             }
         } catch { /* electron API not available */ }
