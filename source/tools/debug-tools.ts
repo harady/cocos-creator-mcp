@@ -430,23 +430,31 @@ export class DebugTools implements ToolCategory {
     }
 
     private async executeOnToolbar(action: "start" | "stop"): Promise<boolean> {
+        // 全体5秒タイムアウト（webContentsが多い場合の保険）
+        return Promise.race([
+            this._tryExecuteOnToolbar(action),
+            new Promise<false>(r => setTimeout(() => r(false), 5000)),
+        ]);
+    }
+
+    private async _tryExecuteOnToolbar(action: "start" | "stop"): Promise<boolean> {
         try {
             const electron = require("electron");
             const allContents = electron.webContents.getAllWebContents();
             const script = action === "start"
-                ? `(async () => { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`
-                : `(async () => { if (window.xxx && window.xxx.gameView.isPlay) { await window.xxx.play(); return true; } return false; })()`;
+                ? `(function() { if (window.xxx && window.xxx.play && !window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`
+                : `(function() { if (window.xxx && window.xxx.gameView.isPlay) { window.xxx.play(); return true; } return false; })()`;
 
-            for (const wc of allContents) {
-                try {
-                    // 各webContentsに3秒タイムアウトを設定（ハング防止）
-                    const result = await Promise.race([
+            // 全webContentsに並列で試行（直列だとタイムアウトしやすい）
+            const results = await Promise.allSettled(
+                allContents.map((wc: any) =>
+                    Promise.race([
                         wc.executeJavaScript(script),
-                        new Promise<false>(r => setTimeout(() => r(false), 3000)),
-                    ]);
-                    if (result) return true;
-                } catch { /* not the toolbar webContents */ }
-            }
+                        new Promise<false>(r => setTimeout(() => r(false), 2000)),
+                    ]).catch(() => false)
+                )
+            );
+            return results.some(r => r.status === "fulfilled" && r.value === true);
         } catch { /* electron API not available */ }
         return false;
     }
