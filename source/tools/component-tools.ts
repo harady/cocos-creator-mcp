@@ -193,14 +193,19 @@ export class ComponentTools implements ToolCategory {
                     if (propDump?.type) {
                         const propType = propDump.type as string;
                         const extendsArr = (propDump.extends || []) as string[];
-                        // Node/Component参照型: cc.Nodeを継承するもの
-                        const isNodeRef = propType === "cc.Node" ||
-                            extendsArr.includes("cc.Component") ||
-                            extendsArr.includes("cc.Object");
-                        // Asset参照型: cc.Assetを継承するもの（cc.Prefab, cc.SpriteFrame等）
+                        const isComponentRef = extendsArr.includes("cc.Component");
+                        const isNodeRef = propType === "cc.Node";
                         const isAssetRef = extendsArr.includes("cc.Asset");
 
-                        if (isNodeRef || isAssetRef) {
+                        if (isComponentRef) {
+                            // コンポーネント参照: ノードUUIDからコンポーネントUUIDを解決
+                            const compUuid = await this.resolveComponentUuid(value, propType);
+                            return { type: propType, value: { uuid: compUuid || value } };
+                        }
+                        if (isNodeRef) {
+                            return { type: propType, value: { uuid: value } };
+                        }
+                        if (isAssetRef) {
                             return { type: propType, value: { uuid: value } };
                         }
                     }
@@ -241,6 +246,22 @@ export class ComponentTools implements ToolCategory {
             }
         }
         return current;
+    }
+
+    /**
+     * ノードUUIDからコンポーネントUUIDを解決する。
+     * propType（例: "cc.ScrollView", "MissionListPanel"）に一致するコンポーネントを探す。
+     */
+    private async resolveComponentUuid(nodeUuid: string, propType: string): Promise<string | null> {
+        try {
+            const nodeInfo = await this.sceneScript("getNodeInfo", [nodeUuid]);
+            if (!nodeInfo?.success || !nodeInfo?.data?.components) return null;
+            const typeName = propType.replace("cc.", "");
+            const comp = nodeInfo.data.components.find((c: any) => c.type === typeName);
+            return comp?.uuid || null;
+        } catch (_e) {
+            return null;
+        }
     }
 
     private async sceneScript(method: string, args: any[]): Promise<any> {
