@@ -163,10 +163,25 @@ export class NodeTools implements ToolCategory {
                     required: ["uuid"],
                 },
             },
+            {
+                name: "node_create_tree",
+                description: "Create a full node tree from a JSON spec in one call. Much faster than creating nodes one by one. Spec format: { name, components?: ['cc.UITransform'], properties?: {'cc.UITransform.contentSize': {width:720,height:1280}}, active?: bool, position?: {x,y,z}, children?: [...] }",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        parent: { type: "string", description: "Parent node UUID" },
+                        spec: { description: "Node tree specification (JSON object with name, components, properties, children)" },
+                    },
+                    required: ["parent", "spec"],
+                },
+            },
         ];
     }
 
     async execute(toolName: string, args: Record<string, any>): Promise<ToolResult> {
+        const rejected = await this.rejectIfPreviewRunning(toolName);
+        if (rejected) return rejected;
+
         switch (toolName) {
             case "node_create":
                 return this.createNode(args.name, args.parent, args.components);
@@ -190,6 +205,8 @@ export class NodeTools implements ToolCategory {
                 return this.setProperty(args.uuid, "active", args.active);
             case "node_set_layer":
                 return this.setProperty(args.uuid, "layer", args.layer);
+            case "node_create_tree":
+                return this.createNodeTree(args.parent, args.spec);
             case "node_detect_type": {
                 try {
                     const info = await this.sceneScript("getNodeInfo", [args.uuid]);
@@ -207,6 +224,24 @@ export class NodeTools implements ToolCategory {
         }
     }
 
+    /** Scene editing tools that must not run during preview */
+    private static readonly SCENE_EDIT_TOOLS = new Set([
+        "node_create", "node_delete", "node_move", "node_duplicate",
+        "node_set_property", "node_set_transform", "node_set_active", "node_set_layer",
+        "node_create_tree",
+    ]);
+
+    private async rejectIfPreviewRunning(toolName: string): Promise<ToolResult | null> {
+        if (!NodeTools.SCENE_EDIT_TOOLS.has(toolName)) return null;
+        try {
+            const state = await Editor.Message.request("preview", "query-info");
+            if (state && (state as any).running) {
+                return err(`"${toolName}" はプレビュー中に実行できません。先にプレビューを停止してください。`);
+            }
+        } catch { /* query failed — allow execution */ }
+        return null;
+    }
+
     private async createNode(name: string, parent?: string, components?: string[]): Promise<ToolResult> {
         try {
             // Use Editor API to create node
@@ -216,6 +251,9 @@ export class NodeTools implements ToolCategory {
                 assetUuid: undefined,
             });
 
+            // Wait until the node is queryable in the scene process
+            await this.waitForNode(uuid);
+
             // Add components if specified
             if (components && components.length > 0) {
                 for (const comp of components) {
@@ -224,6 +262,33 @@ export class NodeTools implements ToolCategory {
             }
 
             return ok({ success: true, uuid, name });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * Wait until a node becomes queryable in the scene process.
+     * Editor.Message.request("scene", "create-node") returns before the node
+     * is fully registered in the scene hierarchy, so subsequent scene script
+     * calls (findNode) may fail without this wait.
+     */
+    private async waitForNode(uuid: string, maxRetries = 10, intervalMs = 100): Promise<void> {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const result = await this.sceneScript("getNodeInfo", [uuid]);
+                if (result?.success) return;
+            } catch { /* not ready yet */ }
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+        // Don't throw — let the caller proceed and get a more specific error if needed
+    }
+
+    private async createNodeTree(parentUuid: string, spec: any): Promise<ToolResult> {
+        try {
+            const result = await this.sceneScript("buildNodeTree", [parentUuid, spec]);
+            if (!result?.success) return err(result?.error || "buildNodeTree failed");
+            return ok(result);
         } catch (e: any) {
             return err(e.message || String(e));
         }

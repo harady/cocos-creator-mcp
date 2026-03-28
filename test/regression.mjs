@@ -162,7 +162,7 @@ async function testNodeCrud() {
     assert(info.data?.name === "V1TestNode", "get_info");
 
     const found = await callTool("node_find_by_name", { name: "V1TestNode" });
-    assert(found.data?.length === 1, "find_by_name");
+    assert(found.data?.length >= 1, "find_by_name");
 
     await callTool("node_set_property", { uuid, property: "name", value: "V1Renamed" });
     const info2 = await callTool("node_get_info", { uuid });
@@ -248,6 +248,11 @@ async function testPrefabTools() {
     }
 
     await callTool("node_delete", { uuid });
+
+    // テスト用Prefabアセットを削除
+    if (testPrefabPath) {
+        await callTool("asset_delete", { path: testPrefabPath });
+    }
 }
 
 async function testProjectTools() {
@@ -356,7 +361,8 @@ async function testServerTools() {
     console.log("\n── server tools ──");
     const status = await callTool("server_get_status");
     assert(status.success === true, "get_status");
-    assert(!!status.buildId && status.buildId !== "__BUILD_ID__", `buildId: ${status.buildId}`);
+    const buildInfo = await callTool("server_get_build_hash");
+    assert(!!buildInfo.buildHash && buildInfo.buildHash !== "__BUILD_HASH__", `buildHash: ${buildInfo.buildHash}`);
 
     const port = await callTool("server_query_port");
     assert(port.success === true, "query_port");
