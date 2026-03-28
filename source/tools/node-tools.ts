@@ -216,6 +216,9 @@ export class NodeTools implements ToolCategory {
                 assetUuid: undefined,
             });
 
+            // Wait until the node is queryable in the scene process
+            await this.waitForNode(uuid);
+
             // Add components if specified
             if (components && components.length > 0) {
                 for (const comp of components) {
@@ -227,6 +230,23 @@ export class NodeTools implements ToolCategory {
         } catch (e: any) {
             return err(e.message || String(e));
         }
+    }
+
+    /**
+     * Wait until a node becomes queryable in the scene process.
+     * Editor.Message.request("scene", "create-node") returns before the node
+     * is fully registered in the scene hierarchy, so subsequent scene script
+     * calls (findNode) may fail without this wait.
+     */
+    private async waitForNode(uuid: string, maxRetries = 10, intervalMs = 100): Promise<void> {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const result = await this.sceneScript("getNodeInfo", [uuid]);
+                if (result?.success) return;
+            } catch { /* not ready yet */ }
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+        // Don't throw — let the caller proceed and get a more specific error if needed
     }
 
     private async getNodeInfo(uuid: string): Promise<ToolResult> {
