@@ -112,7 +112,12 @@ function buildNodeRecursive(parent: any, spec: any): any {
             if (!comp) continue;
 
             try {
-                comp[propName] = value;
+                // contentSize needs special handling (Size type)
+                if (propName === "contentSize" && value && typeof value === "object") {
+                    comp.setContentSize((value as any).width ?? 0, (value as any).height ?? 0);
+                } else {
+                    comp[propName] = value;
+                }
             } catch { /* skip invalid property */ }
         }
     }
