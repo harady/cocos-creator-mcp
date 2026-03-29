@@ -85,6 +85,19 @@ export class ComponentTools implements ToolCategory {
                 description: "List all available component classes that can be added to nodes.",
                 inputSchema: { type: "object", properties: {} },
             },
+            {
+                name: "component_query_enum",
+                description: "Get enum values for a component property. Useful for knowing what values Layout.type, Layout.resizeMode, etc. accept.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID" },
+                        componentType: { type: "string", description: "Component class (e.g. 'cc.Layout')" },
+                        property: { type: "string", description: "Property name (e.g. 'type', 'resizeMode')" },
+                    },
+                    required: ["uuid", "componentType", "property"],
+                },
+            },
         ];
     }
 
@@ -115,6 +128,8 @@ export class ComponentTools implements ToolCategory {
                     return ok({ success: true, classes });
                 } catch (e: any) { return err(e.message || String(e)); }
             }
+            case "component_query_enum":
+                return this.queryEnum(args.uuid, compType, args.property);
             default:
                 return err(`Unknown tool: ${toolName}`);
         }
@@ -124,6 +139,37 @@ export class ComponentTools implements ToolCategory {
         try {
             const result = await this.sceneScript("addComponentToNode", [uuid, componentType]);
             return ok(result);
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    private async queryEnum(nodeUuid: string, componentType: string, property: string): Promise<ToolResult> {
+        try {
+            const nodeDump = await (Editor.Message.request as any)("scene", "query-node", nodeUuid);
+            if (!nodeDump) return err("Node not found");
+
+            const comps = nodeDump.__comps__ || [];
+            for (const comp of comps) {
+                const compType = comp.type;
+                if (!compType) continue;
+                // Match by cc.XXX format
+                const normalizedType = componentType.startsWith("cc.") ? componentType.substring(3) : componentType;
+                if (compType !== `cc.${normalizedType}` && compType !== componentType) continue;
+
+                const propDump = comp.value?.[property];
+                if (!propDump) return err(`Property '${property}' not found on ${componentType}`);
+                if (propDump.type !== "Enum") {
+                    return ok({ success: true, property, type: propDump.type, note: "Not an enum property", currentValue: propDump.value });
+                }
+                return ok({
+                    success: true,
+                    property,
+                    currentValue: propDump.value,
+                    enumList: propDump.enumList,
+                });
+            }
+            return err(`Component ${componentType} not found on node`);
         } catch (e: any) {
             return err(e.message || String(e));
         }

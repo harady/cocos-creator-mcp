@@ -165,7 +165,7 @@ export class NodeTools implements ToolCategory {
             },
             {
                 name: "node_create_tree",
-                description: "Create a full node tree from a JSON spec in one call. Much faster than creating nodes one by one. Spec format: { name, components?: ['cc.UITransform'], properties?: {'cc.UITransform.contentSize': {width:720,height:1280}}, active?: bool, position?: {x,y,z}, children?: [...] }",
+                description: "Create a full node tree from a JSON spec in one call. Much faster than creating nodes one by one. Spec format: { name, components?: ['cc.UITransform'], properties?: {'cc.UITransform.contentSize': {width:720,height:1280}}, widget?: {top:0, bottom:0, left:0, right:0}, active?: bool, position?: {x,y,z}, children?: [...] }",
                 inputSchema: {
                     type: "object",
                     properties: {

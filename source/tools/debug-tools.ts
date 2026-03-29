@@ -43,6 +43,7 @@ export class DebugTools implements ToolCategory {
                     properties: {
                         count: { type: "number", description: "Max number of entries (default 50)" },
                         level: { type: "string", description: "Filter by level: 'log', 'warn', or 'error'" },
+                        source: { type: "string", description: "Filter by source: 'scene' or 'game'. Returns both if omitted." },
                     },
                 },
             },
@@ -104,11 +105,11 @@ export class DebugTools implements ToolCategory {
             },
             {
                 name: "debug_game_command",
-                description: "Send a command to the running game preview. Requires GameDebugClient in the game. Commands: 'screenshot' (capture game canvas), 'state' (dump GameDb), 'navigate' (go to a page), 'click' (click a node by name). Returns the result from the game.",
+                description: "Send a command to the running game preview. Requires GameDebugClient in the game. Commands: 'screenshot' (capture game canvas), 'state' (dump GameDb), 'navigate' (go to a page), 'click' (click a node by name), 'inspect' (get runtime node info: UITransform sizes, Widget, Layout, position). Returns the result from the game.",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        type: { type: "string", description: "Command type: 'screenshot', 'state', 'navigate', 'click'" },
+                        type: { type: "string", description: "Command type: 'screenshot', 'state', 'navigate', 'click', 'inspect'" },
                         args: { description: "Command arguments (e.g. {page: 'HomePageView'} for navigate, {name: 'ButtonName'} for click)" },
                         timeout: { type: "number", description: "Max wait time in ms (default 5000)" },
                         maxWidth: { type: "number", description: "Max width for screenshot resize (default: 960, 0 = no resize)" },
@@ -134,6 +135,8 @@ export class DebugTools implements ToolCategory {
                     type: "object",
                     properties: {
                         action: { type: "string", description: "'start' (default) or 'stop'" },
+                        waitForReady: { type: "boolean", description: "If true, wait until GameDebugClient connects after start (default: false)" },
+                        waitTimeout: { type: "number", description: "Max wait time in ms for waitForReady (default: 15000)" },
                     },
                 },
             },
@@ -158,6 +161,23 @@ export class DebugTools implements ToolCategory {
                     required: ["name"],
                 },
             },
+            {
+                name: "debug_batch_screenshot",
+                description: "Navigate to multiple pages and take a screenshot of each. Requires game preview running with GameDebugClient. Returns an array of screenshot file paths.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        pages: {
+                            type: "array",
+                            items: { type: "string" },
+                            description: "List of page names to screenshot (e.g. ['HomePageView', 'ShopPageView'])",
+                        },
+                        delay: { type: "number", description: "Delay in ms between navigate and screenshot (default: 1000)" },
+                        maxWidth: { type: "number", description: "Max width for screenshot resize (default: 960)" },
+                    },
+                    required: ["pages"],
+                },
+            },
         ];
     }
 
@@ -171,7 +191,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_execute_script":
                     return this.executeScript(args.method, args.args || []);
                 case "debug_get_console_logs":
-                    return this.getConsoleLogs(args.count || 50, args.level);
+                    return this.getConsoleLogs(args.count || 50, args.level, args.source);
                 case "debug_clear_console":
                     Editor.Message.send("console", "clear");
                     // Clear scene process log buffer
@@ -203,7 +223,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_screenshot":
                     return this.takeScreenshot(args.savePath, args.maxWidth);
                 case "debug_preview":
-                    return this.handlePreview(args.action || "start");
+                    return this.handlePreview(args.action || "start", args.waitForReady, args.waitTimeout || 15000);
                 case "debug_clear_code_cache":
                     return this.clearCodeCache();
                 case "debug_reload_extension":
@@ -212,6 +232,8 @@ export class DebugTools implements ToolCategory {
                     return this.validateScene();
                 case "debug_get_extension_info":
                     return this.getExtensionInfo(args.name);
+                case "debug_batch_screenshot":
+                    return this.batchScreenshot(args.pages, args.delay || 1000, args.maxWidth);
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }
@@ -266,34 +288,40 @@ export class DebugTools implements ToolCategory {
         return ok(result);
     }
 
-    private async getConsoleLogs(count: number, level?: string): Promise<ToolResult> {
+    private async getConsoleLogs(count: number, level?: string, source?: string): Promise<ToolResult> {
         // 1. Try Editor's native console API first (may be supported in future CocosCreator versions)
-        try {
-            const logs = await (Editor.Message.request as any)("console", "query-last-logs", count);
-            if (Array.isArray(logs) && logs.length > 0) {
-                return ok({ success: true, logs, source: "editor-api", note: "Using native Editor console API" });
-            }
-        } catch { /* Not supported in this version — use fallback */ }
+        if (!source) {
+            try {
+                const logs = await (Editor.Message.request as any)("console", "query-last-logs", count);
+                if (Array.isArray(logs) && logs.length > 0) {
+                    return ok({ success: true, logs, source: "editor-api", note: "Using native Editor console API" });
+                }
+            } catch { /* Not supported in this version — use fallback */ }
+        }
 
         // 2. Fallback: collect from scene process buffer + game preview buffer
         let sceneLogs: any[] = [];
         let gameLogs: any[] = [];
 
         // 2a. Scene process logs (console wrapper in scene.ts)
-        try {
-            const result = await Editor.Message.request("scene", "execute-scene-script", {
-                name: "cocos-creator-mcp",
-                method: "getConsoleLogs",
-                args: [count * 2, level], // request more, will trim after merge
-            });
-            if (result?.logs) {
-                sceneLogs = result.logs.map((l: any) => ({ ...l, source: "scene" }));
-            }
-        } catch { /* scene not available */ }
+        if (!source || source === "scene") {
+            try {
+                const result = await Editor.Message.request("scene", "execute-scene-script", {
+                    name: "cocos-creator-mcp",
+                    method: "getConsoleLogs",
+                    args: [count * 2, level], // request more, will trim after merge
+                });
+                if (result?.logs) {
+                    sceneLogs = result.logs.map((l: any) => ({ ...l, source: "scene" }));
+                }
+            } catch { /* scene not available */ }
+        }
 
         // 2b. Game preview logs (received via POST /log endpoint)
-        const gameResult = getGameLogs(count * 2, level);
-        gameLogs = gameResult.logs.map((l: any) => ({ ...l, source: "game" }));
+        if (!source || source === "game") {
+            const gameResult = getGameLogs(count * 2, level);
+            gameLogs = gameResult.logs.map((l: any) => ({ ...l, source: "game" }));
+        }
 
         // Merge and sort by timestamp, take last `count`
         const merged = [...sceneLogs, ...gameLogs]
@@ -303,7 +331,7 @@ export class DebugTools implements ToolCategory {
         return ok({
             success: true,
             logs: merged,
-            total: { scene: sceneLogs.length, game: gameResult.total },
+            total: { scene: sceneLogs.length, game: (source === "scene" ? 0 : gameLogs.length) },
         });
     }
 
@@ -368,11 +396,34 @@ export class DebugTools implements ToolCategory {
         }
     }
 
-    private async handlePreview(action: string): Promise<ToolResult> {
+    private async handlePreview(action: string, waitForReady?: boolean, waitTimeout?: number): Promise<ToolResult> {
         if (action === "stop") {
             return this.stopPreview();
         }
-        return this.startPreview();
+        const result = await this.startPreview();
+        if (waitForReady) {
+            const resultData = JSON.parse(result.content[0].text);
+            if (resultData.success) {
+                const ready = await this.waitForGameReady(waitTimeout || 15000);
+                resultData.gameReady = ready;
+                if (!ready) {
+                    resultData.note = (resultData.note || "") + " GameDebugClient did not connect within timeout.";
+                }
+                return ok(resultData);
+            }
+        }
+        return result;
+    }
+
+    private async waitForGameReady(timeout: number): Promise<boolean> {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            // Check if game has sent any log or command result recently
+            const gameResult = getGameLogs(1);
+            if (gameResult.total > 0) return true;
+            await new Promise(r => setTimeout(r, 500));
+        }
+        return false;
     }
 
     private async startPreview(): Promise<ToolResult> {
@@ -633,7 +684,44 @@ export class DebugTools implements ToolCategory {
                 console.error("[MCP] Extension reload failed:", e.message);
             }
         }, 500);
-        return ok({ success: true, note: "Extension reload scheduled. MCP server will restart in ~1s." });
+        return ok({ success: true, note: "Extension reload scheduled. MCP server will restart in ~1s. NOTE: Adding new tool definitions or modifying scene.ts requires a full CocosCreator restart (reload is not sufficient)." });
+    }
+
+    private async batchScreenshot(pages: string[], delay: number, maxWidth?: number): Promise<ToolResult> {
+        const results: any[] = [];
+        const timeout = 10000;
+
+        for (const page of pages) {
+            // Navigate
+            const navResult = await this.gameCommand("navigate", { page }, timeout, maxWidth);
+            const navData = JSON.parse(navResult.content[0].text);
+            if (!navData.success) {
+                results.push({ page, success: false, error: "navigate failed" });
+                continue;
+            }
+
+            // Wait for page to render
+            await new Promise(r => setTimeout(r, delay));
+
+            // Screenshot
+            const ssResult = await this.gameCommand("screenshot", {}, timeout, maxWidth);
+            const ssData = JSON.parse(ssResult.content[0].text);
+            results.push({
+                page,
+                success: ssData.success || false,
+                path: ssData.path,
+                error: ssData.success ? undefined : (ssData.error || ssData.message),
+            });
+        }
+
+        const succeeded = results.filter(r => r.success).length;
+        return ok({
+            success: true,
+            total: pages.length,
+            succeeded,
+            failed: pages.length - succeeded,
+            results,
+        });
     }
 
     private async validateScene(): Promise<ToolResult> {

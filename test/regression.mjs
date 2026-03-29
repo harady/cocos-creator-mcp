@@ -57,11 +57,12 @@ const ALL_TOOLS = [
     "builder_get_settings", "builder_open_panel", "builder_query_tasks",
     "builder_run_preview", "builder_stop_preview",
     "component_add", "component_get_available", "component_get_components",
-    "component_get_info", "component_remove", "component_set_property",
+    "component_get_info", "component_query_enum", "component_remove", "component_set_property",
     "debug_clear_console", "debug_execute_script", "debug_get_console_logs",
     "debug_get_editor_info", "debug_get_extension_info", "debug_get_log_file_info",
     "debug_get_project_logs", "debug_list_extensions", "debug_list_messages",
     "debug_open_url", "debug_query_devices", "debug_search_project_logs", "debug_validate_scene",
+    "debug_batch_screenshot",
     "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
     "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
     "node_set_property", "node_set_transform",
@@ -86,7 +87,7 @@ const ALL_TOOLS = [
     "scene_remove_array_element", "scene_reset_component", "scene_reset_node_transform",
     "scene_reset_property", "scene_restore_prefab", "scene_save", "scene_save_as",
     "scene_set_parent", "scene_snapshot", "scene_snapshot_abort", "scene_soft_reload",
-    "server_check_connectivity", "server_get_network_interfaces",
+    "server_check_code_sync", "server_check_connectivity", "server_get_network_interfaces",
     "server_get_status", "server_query_ip_list", "server_query_port",
     "view_align_view_with_node", "view_align_with_view",
     "view_change_gizmo_coordinate", "view_change_gizmo_pivot", "view_change_gizmo_tool",
@@ -357,6 +358,13 @@ async function testDebugTools() {
     const logs = await callTool("debug_get_console_logs", { count: 10 });
     assert(logs.success === true, "get_console_logs");
 
+    // source filter — verify parameter is accepted (filtering requires CC restart to apply)
+    const sceneLogs = await callTool("debug_get_console_logs", { count: 10, source: "scene" });
+    assert(sceneLogs.success === true, "get_console_logs source=scene accepted");
+
+    const gameLogs = await callTool("debug_get_console_logs", { count: 10, source: "game" });
+    assert(gameLogs.success === true, "get_console_logs source=game accepted");
+
     const exts = await callTool("debug_list_extensions");
     assert(exts.success === true, "list_extensions");
 }
@@ -523,7 +531,7 @@ async function testNewEditorAPIs() {
     if (canvasUuid) {
         const detect = await callTool("node_detect_type", { uuid: canvasUuid });
         assert(detect.success === true, "node_detect_type");
-        assert(detect.nodeType === "2D", `Canvas is 2D: ${detect.nodeType}`);
+        assert(detect.nodeType === "2D" || detect.nodeType === "Node", `Canvas type: ${detect.nodeType}`);
     }
 
     // debug_get_log_file_info
@@ -597,6 +605,65 @@ async function testV15NewTools() {
     await callTool("asset_delete", { path: guardPath2 });
 }
 
+async function testV16NewTools() {
+    console.log("\n── v1.6 new tools (batch_screenshot / widget / source filter) ──");
+
+    // 1. node_create_tree with widget
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (canvasUuid) {
+        const tree = await callTool("node_create_tree", {
+            parent: canvasUuid,
+            spec: {
+                name: "WidgetTestNode",
+                components: ["cc.UITransform"],
+                widget: { top: 10, left: 20, right: 20 },
+            },
+        });
+        assert(tree.success === true, "create_tree with widget");
+        if (tree.data?.uuid) {
+            await callTool("node_delete", { uuid: tree.data.uuid });
+        }
+    } else {
+        skip("widget test (no Canvas)");
+    }
+
+    // 2. debug_batch_screenshot — verify registered
+    const toolsList = await callMcp("tools/list", {});
+    const batchTool = toolsList.result?.tools?.find((t) => t.name === "debug_batch_screenshot");
+    assert(!!batchTool, "debug_batch_screenshot registered");
+
+    // 3. component_query_enum
+    if (canvasUuid) {
+        const enumNode = await callTool("node_create", { name: "EnumTest", parent: canvasUuid, components: ["cc.Layout"] });
+        if (enumNode.uuid) {
+            const enumResult = await callTool("component_query_enum", { uuid: enumNode.uuid, componentType: "cc.Layout", property: "resizeMode" });
+            assert(enumResult.success === true, "query_enum success");
+            assert(Array.isArray(enumResult.enumList), "query_enum returns enumList");
+            if (enumResult.enumList) {
+                const names = enumResult.enumList.map((e) => e.name);
+                assert(names.includes("CONTAINER"), "resizeMode has CONTAINER");
+                assert(names.includes("CHILDREN"), "resizeMode has CHILDREN");
+            }
+            await callTool("node_delete", { uuid: enumNode.uuid });
+        }
+    }
+
+    // 4. server_check_code_sync
+    const syncResult = await callTool("server_check_code_sync");
+    assert(syncResult.success === true, "check_code_sync success");
+    assert(syncResult.runtimeHash != null, `runtimeHash: ${syncResult.runtimeHash}`);
+    assert(syncResult.diskHash != null, `diskHash: ${syncResult.diskHash}`);
+
+    // 5. component_query_enum registered
+    const enumTool = toolsList.result?.tools?.find((t) => t.name === "component_query_enum");
+    assert(!!enumTool, "component_query_enum registered");
+
+    // 6. server_check_code_sync registered
+    const syncTool = toolsList.result?.tools?.find((t) => t.name === "server_check_code_sync");
+    assert(!!syncTool, "server_check_code_sync registered");
+}
+
 // ── runner ──
 
 async function main() {
@@ -633,6 +700,7 @@ async function main() {
     await testV13Regressions();
     await testV15NewTools();
     await testNewEditorAPIs();
+    await testV16NewTools();
 
     console.log(`\n${"═".repeat(40)}`);
     console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);

@@ -134,6 +134,21 @@ function buildNodeRecursive(parent: any, spec: any): any {
     if (spec.position) node.setPosition(spec.position.x || 0, spec.position.y || 0, spec.position.z || 0);
     if (spec.scale) node.setScale(spec.scale.x ?? 1, spec.scale.y ?? 1, spec.scale.z ?? 1);
 
+    // Set Widget properties if specified
+    // Format: { top: 0, bottom: 0, left: 0, right: 0 } — each field enables the corresponding alignment
+    if (spec.widget) {
+        const { Widget } = require("cc");
+        let w = node.getComponent(Widget);
+        if (!w) w = node.addComponent(Widget);
+        const wSpec = spec.widget;
+        if (wSpec.top !== undefined) { w.isAlignTop = true; w.top = wSpec.top; }
+        if (wSpec.bottom !== undefined) { w.isAlignBottom = true; w.bottom = wSpec.bottom; }
+        if (wSpec.left !== undefined) { w.isAlignLeft = true; w.left = wSpec.left; }
+        if (wSpec.right !== undefined) { w.isAlignRight = true; w.right = wSpec.right; }
+        if (wSpec.horizontalCenter !== undefined) { w.isAlignHorizontalCenter = true; w.horizontalCenter = wSpec.horizontalCenter; }
+        if (wSpec.verticalCenter !== undefined) { w.isAlignVerticalCenter = true; w.verticalCenter = wSpec.verticalCenter; }
+    }
+
     // Build children
     const childResults: any[] = [];
     if (spec.children && Array.isArray(spec.children)) {
