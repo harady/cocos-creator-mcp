@@ -62,6 +62,7 @@ const ALL_TOOLS = [
     "debug_get_editor_info", "debug_get_extension_info", "debug_get_log_file_info",
     "debug_get_project_logs", "debug_list_extensions", "debug_list_messages",
     "debug_open_url", "debug_query_devices", "debug_search_project_logs", "debug_validate_scene",
+    "debug_batch_screenshot",
     "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
     "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
     "node_set_property", "node_set_transform",
@@ -604,6 +605,37 @@ async function testV15NewTools() {
     await callTool("asset_delete", { path: guardPath2 });
 }
 
+async function testV16NewTools() {
+    console.log("\n── v1.6 new tools (batch_screenshot / widget / source filter) ──");
+
+    // 1. node_create_tree with widget
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (canvasUuid) {
+        const tree = await callTool("node_create_tree", {
+            parent: canvasUuid,
+            spec: {
+                name: "WidgetTestNode",
+                components: ["cc.UITransform"],
+                widget: { top: 10, left: 20, right: 20 },
+            },
+        });
+        assert(tree.success === true, "create_tree with widget");
+        if (tree.data?.uuid) {
+            await callTool("node_delete", { uuid: tree.data.uuid });
+        }
+    } else {
+        skip("widget test (no Canvas)");
+    }
+
+    // 2. debug_batch_screenshot — just verify the tool exists and accepts params
+    const health = await fetch(`${BASE}/health`);
+    const healthData = await health.json();
+    const toolsList = await callMcp("tools/list", {});
+    const batchTool = toolsList.result?.tools?.find((t) => t.name === "debug_batch_screenshot");
+    assert(!!batchTool, "debug_batch_screenshot registered");
+}
+
 // ── runner ──
 
 async function main() {
@@ -640,6 +672,7 @@ async function main() {
     await testV13Regressions();
     await testV15NewTools();
     await testNewEditorAPIs();
+    await testV16NewTools();
 
     console.log(`\n${"═".repeat(40)}`);
     console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);

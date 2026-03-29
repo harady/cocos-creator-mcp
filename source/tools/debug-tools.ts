@@ -135,6 +135,8 @@ export class DebugTools implements ToolCategory {
                     type: "object",
                     properties: {
                         action: { type: "string", description: "'start' (default) or 'stop'" },
+                        waitForReady: { type: "boolean", description: "If true, wait until GameDebugClient connects after start (default: false)" },
+                        waitTimeout: { type: "number", description: "Max wait time in ms for waitForReady (default: 15000)" },
                     },
                 },
             },
@@ -157,6 +159,23 @@ export class DebugTools implements ToolCategory {
                         name: { type: "string", description: "Extension name" },
                     },
                     required: ["name"],
+                },
+            },
+            {
+                name: "debug_batch_screenshot",
+                description: "Navigate to multiple pages and take a screenshot of each. Requires game preview running with GameDebugClient. Returns an array of screenshot file paths.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        pages: {
+                            type: "array",
+                            items: { type: "string" },
+                            description: "List of page names to screenshot (e.g. ['HomePageView', 'ShopPageView'])",
+                        },
+                        delay: { type: "number", description: "Delay in ms between navigate and screenshot (default: 1000)" },
+                        maxWidth: { type: "number", description: "Max width for screenshot resize (default: 960)" },
+                    },
+                    required: ["pages"],
                 },
             },
         ];
@@ -204,7 +223,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_screenshot":
                     return this.takeScreenshot(args.savePath, args.maxWidth);
                 case "debug_preview":
-                    return this.handlePreview(args.action || "start");
+                    return this.handlePreview(args.action || "start", args.waitForReady, args.waitTimeout || 15000);
                 case "debug_clear_code_cache":
                     return this.clearCodeCache();
                 case "debug_reload_extension":
@@ -213,6 +232,8 @@ export class DebugTools implements ToolCategory {
                     return this.validateScene();
                 case "debug_get_extension_info":
                     return this.getExtensionInfo(args.name);
+                case "debug_batch_screenshot":
+                    return this.batchScreenshot(args.pages, args.delay || 1000, args.maxWidth);
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }
@@ -375,11 +396,34 @@ export class DebugTools implements ToolCategory {
         }
     }
 
-    private async handlePreview(action: string): Promise<ToolResult> {
+    private async handlePreview(action: string, waitForReady?: boolean, waitTimeout?: number): Promise<ToolResult> {
         if (action === "stop") {
             return this.stopPreview();
         }
-        return this.startPreview();
+        const result = await this.startPreview();
+        if (waitForReady) {
+            const resultData = JSON.parse(result.content[0].text);
+            if (resultData.success) {
+                const ready = await this.waitForGameReady(waitTimeout || 15000);
+                resultData.gameReady = ready;
+                if (!ready) {
+                    resultData.note = (resultData.note || "") + " GameDebugClient did not connect within timeout.";
+                }
+                return ok(resultData);
+            }
+        }
+        return result;
+    }
+
+    private async waitForGameReady(timeout: number): Promise<boolean> {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            // Check if game has sent any log or command result recently
+            const gameResult = getGameLogs(1);
+            if (gameResult.total > 0) return true;
+            await new Promise(r => setTimeout(r, 500));
+        }
+        return false;
     }
 
     private async startPreview(): Promise<ToolResult> {
@@ -641,6 +685,43 @@ export class DebugTools implements ToolCategory {
             }
         }, 500);
         return ok({ success: true, note: "Extension reload scheduled. MCP server will restart in ~1s. NOTE: Adding new tool definitions or modifying scene.ts requires a full CocosCreator restart (reload is not sufficient)." });
+    }
+
+    private async batchScreenshot(pages: string[], delay: number, maxWidth?: number): Promise<ToolResult> {
+        const results: any[] = [];
+        const timeout = 10000;
+
+        for (const page of pages) {
+            // Navigate
+            const navResult = await this.gameCommand("navigate", { page }, timeout, maxWidth);
+            const navData = JSON.parse(navResult.content[0].text);
+            if (!navData.success) {
+                results.push({ page, success: false, error: "navigate failed" });
+                continue;
+            }
+
+            // Wait for page to render
+            await new Promise(r => setTimeout(r, delay));
+
+            // Screenshot
+            const ssResult = await this.gameCommand("screenshot", {}, timeout, maxWidth);
+            const ssData = JSON.parse(ssResult.content[0].text);
+            results.push({
+                page,
+                success: ssData.success || false,
+                path: ssData.path,
+                error: ssData.success ? undefined : (ssData.error || ssData.message),
+            });
+        }
+
+        const succeeded = results.filter(r => r.success).length;
+        return ok({
+            success: true,
+            total: pages.length,
+            succeeded,
+            failed: pages.length - succeeded,
+            results,
+        });
     }
 
     private async validateScene(): Promise<ToolResult> {
