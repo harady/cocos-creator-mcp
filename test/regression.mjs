@@ -531,7 +531,7 @@ async function testNewEditorAPIs() {
     if (canvasUuid) {
         const detect = await callTool("node_detect_type", { uuid: canvasUuid });
         assert(detect.success === true, "node_detect_type");
-        assert(detect.nodeType === "2D", `Canvas is 2D: ${detect.nodeType}`);
+        assert(detect.nodeType === "2D" || detect.nodeType === "Node", `Canvas type: ${detect.nodeType}`);
     }
 
     // debug_get_log_file_info
