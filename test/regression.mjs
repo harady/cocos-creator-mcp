@@ -357,6 +357,13 @@ async function testDebugTools() {
     const logs = await callTool("debug_get_console_logs", { count: 10 });
     assert(logs.success === true, "get_console_logs");
 
+    // source filter — verify parameter is accepted (filtering requires CC restart to apply)
+    const sceneLogs = await callTool("debug_get_console_logs", { count: 10, source: "scene" });
+    assert(sceneLogs.success === true, "get_console_logs source=scene accepted");
+
+    const gameLogs = await callTool("debug_get_console_logs", { count: 10, source: "game" });
+    assert(gameLogs.success === true, "get_console_logs source=game accepted");
+
     const exts = await callTool("debug_list_extensions");
     assert(exts.success === true, "list_extensions");
 }

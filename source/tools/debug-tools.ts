@@ -43,6 +43,7 @@ export class DebugTools implements ToolCategory {
                     properties: {
                         count: { type: "number", description: "Max number of entries (default 50)" },
                         level: { type: "string", description: "Filter by level: 'log', 'warn', or 'error'" },
+                        source: { type: "string", description: "Filter by source: 'scene' or 'game'. Returns both if omitted." },
                     },
                 },
             },
@@ -171,7 +172,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_execute_script":
                     return this.executeScript(args.method, args.args || []);
                 case "debug_get_console_logs":
-                    return this.getConsoleLogs(args.count || 50, args.level);
+                    return this.getConsoleLogs(args.count || 50, args.level, args.source);
                 case "debug_clear_console":
                     Editor.Message.send("console", "clear");
                     // Clear scene process log buffer
@@ -266,34 +267,40 @@ export class DebugTools implements ToolCategory {
         return ok(result);
     }
 
-    private async getConsoleLogs(count: number, level?: string): Promise<ToolResult> {
+    private async getConsoleLogs(count: number, level?: string, source?: string): Promise<ToolResult> {
         // 1. Try Editor's native console API first (may be supported in future CocosCreator versions)
-        try {
-            const logs = await (Editor.Message.request as any)("console", "query-last-logs", count);
-            if (Array.isArray(logs) && logs.length > 0) {
-                return ok({ success: true, logs, source: "editor-api", note: "Using native Editor console API" });
-            }
-        } catch { /* Not supported in this version — use fallback */ }
+        if (!source) {
+            try {
+                const logs = await (Editor.Message.request as any)("console", "query-last-logs", count);
+                if (Array.isArray(logs) && logs.length > 0) {
+                    return ok({ success: true, logs, source: "editor-api", note: "Using native Editor console API" });
+                }
+            } catch { /* Not supported in this version — use fallback */ }
+        }
 
         // 2. Fallback: collect from scene process buffer + game preview buffer
         let sceneLogs: any[] = [];
         let gameLogs: any[] = [];
 
         // 2a. Scene process logs (console wrapper in scene.ts)
-        try {
-            const result = await Editor.Message.request("scene", "execute-scene-script", {
-                name: "cocos-creator-mcp",
-                method: "getConsoleLogs",
-                args: [count * 2, level], // request more, will trim after merge
-            });
-            if (result?.logs) {
-                sceneLogs = result.logs.map((l: any) => ({ ...l, source: "scene" }));
-            }
-        } catch { /* scene not available */ }
+        if (!source || source === "scene") {
+            try {
+                const result = await Editor.Message.request("scene", "execute-scene-script", {
+                    name: "cocos-creator-mcp",
+                    method: "getConsoleLogs",
+                    args: [count * 2, level], // request more, will trim after merge
+                });
+                if (result?.logs) {
+                    sceneLogs = result.logs.map((l: any) => ({ ...l, source: "scene" }));
+                }
+            } catch { /* scene not available */ }
+        }
 
         // 2b. Game preview logs (received via POST /log endpoint)
-        const gameResult = getGameLogs(count * 2, level);
-        gameLogs = gameResult.logs.map((l: any) => ({ ...l, source: "game" }));
+        if (!source || source === "game") {
+            const gameResult = getGameLogs(count * 2, level);
+            gameLogs = gameResult.logs.map((l: any) => ({ ...l, source: "game" }));
+        }
 
         // Merge and sort by timestamp, take last `count`
         const merged = [...sceneLogs, ...gameLogs]
@@ -303,7 +310,7 @@ export class DebugTools implements ToolCategory {
         return ok({
             success: true,
             logs: merged,
-            total: { scene: sceneLogs.length, game: gameResult.total },
+            total: { scene: sceneLogs.length, game: (source === "scene" ? 0 : gameLogs.length) },
         });
     }
 
@@ -633,7 +640,7 @@ export class DebugTools implements ToolCategory {
                 console.error("[MCP] Extension reload failed:", e.message);
             }
         }, 500);
-        return ok({ success: true, note: "Extension reload scheduled. MCP server will restart in ~1s." });
+        return ok({ success: true, note: "Extension reload scheduled. MCP server will restart in ~1s. NOTE: Adding new tool definitions or modifying scene.ts requires a full CocosCreator restart (reload is not sufficient)." });
     }
 
     private async validateScene(): Promise<ToolResult> {
