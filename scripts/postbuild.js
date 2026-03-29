@@ -7,9 +7,21 @@ const path = require("path");
 const distDir = path.join(__dirname, "..", "dist");
 const hash = crypto.createHash("sha256");
 
-const jsFiles = fs.readdirSync(distDir)
-    .filter(f => f.endsWith(".js"))
-    .sort(); // 順序を安定させる
+// dist/ 配下を再帰的に走査して全 .js ファイルを収集
+function collectJsFiles(dir, prefix = "") {
+    let files = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+            files = files.concat(collectJsFiles(path.join(dir, entry.name), relPath));
+        } else if (entry.name.endsWith(".js")) {
+            files.push(relPath);
+        }
+    }
+    return files;
+}
+
+const jsFiles = collectJsFiles(distDir).sort();
 
 for (const file of jsFiles) {
     const content = fs.readFileSync(path.join(distDir, file), "utf8");

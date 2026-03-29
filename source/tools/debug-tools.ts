@@ -105,11 +105,11 @@ export class DebugTools implements ToolCategory {
             },
             {
                 name: "debug_game_command",
-                description: "Send a command to the running game preview. Requires GameDebugClient in the game. Commands: 'screenshot' (capture game canvas), 'state' (dump GameDb), 'navigate' (go to a page), 'click' (click a node by name). Returns the result from the game.",
+                description: "Send a command to the running game preview. Requires GameDebugClient in the game. Commands: 'screenshot' (capture game canvas), 'state' (dump GameDb), 'navigate' (go to a page), 'click' (click a node by name), 'inspect' (get runtime node info: UITransform sizes, Widget, Layout, position). Returns the result from the game.",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        type: { type: "string", description: "Command type: 'screenshot', 'state', 'navigate', 'click'" },
+                        type: { type: "string", description: "Command type: 'screenshot', 'state', 'navigate', 'click', 'inspect'" },
                         args: { description: "Command arguments (e.g. {page: 'HomePageView'} for navigate, {name: 'ButtonName'} for click)" },
                         timeout: { type: "number", description: "Max wait time in ms (default 5000)" },
                         maxWidth: { type: "number", description: "Max width for screenshot resize (default: 960, 0 = no resize)" },

@@ -57,7 +57,7 @@ const ALL_TOOLS = [
     "builder_get_settings", "builder_open_panel", "builder_query_tasks",
     "builder_run_preview", "builder_stop_preview",
     "component_add", "component_get_available", "component_get_components",
-    "component_get_info", "component_remove", "component_set_property",
+    "component_get_info", "component_query_enum", "component_remove", "component_set_property",
     "debug_clear_console", "debug_execute_script", "debug_get_console_logs",
     "debug_get_editor_info", "debug_get_extension_info", "debug_get_log_file_info",
     "debug_get_project_logs", "debug_list_extensions", "debug_list_messages",
@@ -87,7 +87,7 @@ const ALL_TOOLS = [
     "scene_remove_array_element", "scene_reset_component", "scene_reset_node_transform",
     "scene_reset_property", "scene_restore_prefab", "scene_save", "scene_save_as",
     "scene_set_parent", "scene_snapshot", "scene_snapshot_abort", "scene_soft_reload",
-    "server_check_connectivity", "server_get_network_interfaces",
+    "server_check_code_sync", "server_check_connectivity", "server_get_network_interfaces",
     "server_get_status", "server_query_ip_list", "server_query_port",
     "view_align_view_with_node", "view_align_with_view",
     "view_change_gizmo_coordinate", "view_change_gizmo_pivot", "view_change_gizmo_tool",
@@ -628,12 +628,40 @@ async function testV16NewTools() {
         skip("widget test (no Canvas)");
     }
 
-    // 2. debug_batch_screenshot — just verify the tool exists and accepts params
-    const health = await fetch(`${BASE}/health`);
-    const healthData = await health.json();
+    // 2. debug_batch_screenshot — verify registered
     const toolsList = await callMcp("tools/list", {});
     const batchTool = toolsList.result?.tools?.find((t) => t.name === "debug_batch_screenshot");
     assert(!!batchTool, "debug_batch_screenshot registered");
+
+    // 3. component_query_enum
+    if (canvasUuid) {
+        const enumNode = await callTool("node_create", { name: "EnumTest", parent: canvasUuid, components: ["cc.Layout"] });
+        if (enumNode.uuid) {
+            const enumResult = await callTool("component_query_enum", { uuid: enumNode.uuid, componentType: "cc.Layout", property: "resizeMode" });
+            assert(enumResult.success === true, "query_enum success");
+            assert(Array.isArray(enumResult.enumList), "query_enum returns enumList");
+            if (enumResult.enumList) {
+                const names = enumResult.enumList.map((e) => e.name);
+                assert(names.includes("CONTAINER"), "resizeMode has CONTAINER");
+                assert(names.includes("CHILDREN"), "resizeMode has CHILDREN");
+            }
+            await callTool("node_delete", { uuid: enumNode.uuid });
+        }
+    }
+
+    // 4. server_check_code_sync
+    const syncResult = await callTool("server_check_code_sync");
+    assert(syncResult.success === true, "check_code_sync success");
+    assert(syncResult.runtimeHash != null, `runtimeHash: ${syncResult.runtimeHash}`);
+    assert(syncResult.diskHash != null, `diskHash: ${syncResult.diskHash}`);
+
+    // 5. component_query_enum registered
+    const enumTool = toolsList.result?.tools?.find((t) => t.name === "component_query_enum");
+    assert(!!enumTool, "component_query_enum registered");
+
+    // 6. server_check_code_sync registered
+    const syncTool = toolsList.result?.tools?.find((t) => t.name === "server_check_code_sync");
+    assert(!!syncTool, "server_check_code_sync registered");
 }
 
 // ── runner ──
