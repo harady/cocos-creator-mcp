@@ -261,6 +261,42 @@ export const methods: Record<string, (...args: any[]) => any> = {
         }
     },
 
+    findNodeByPath(path: string) {
+        try {
+            const scene = getScene();
+            if (!scene) return { success: false, error: "No active scene" };
+
+            const parts = path.split("/");
+            let current: any = null;
+
+            const walk = (node: any): any => {
+                if (node.name === parts[0]) return node;
+                if (node.children) {
+                    for (const child of node.children) {
+                        const found = walk(child);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            };
+            for (const child of scene.children) {
+                current = walk(child);
+                if (current) break;
+            }
+            if (!current) return { success: false, error: `Node "${parts[0]}" not found` };
+
+            for (let i = 1; i < parts.length; i++) {
+                const child = current.children?.find((c: any) => c.name === parts[i]);
+                if (!child) return { success: false, error: `Child "${parts[i]}" not found in "${current.name}"` };
+                current = child;
+            }
+
+            return { success: true, data: collectNodeInfo(current) };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    },
+
     setNodeProperty(uuid: string, property: string, value: any) {
         try {
             const node = findNode(uuid);

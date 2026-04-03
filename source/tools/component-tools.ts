@@ -276,6 +276,17 @@ export class ComponentTools implements ToolCategory {
             return { type: refType, value: { uuid: value.uuid } };
         }
 
+        // @path: プレフィックスの場合: パスからノードUUIDを解決
+        if (typeof value === "string" && value.startsWith("@path:")) {
+            const nodePath = value.slice(6);
+            const result = await this.sceneScript("findNodeByPath", [nodePath]);
+            if (result?.success && result.data?.uuid) {
+                value = result.data.uuid;
+            } else {
+                throw new Error(`Node not found at path: ${nodePath}`);
+            }
+        }
+
         // 文字列の場合: プロパティの型情報を取得して判定
         if (typeof value === "string") {
             try {
