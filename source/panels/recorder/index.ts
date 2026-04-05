@@ -10,7 +10,6 @@ module.exports = Editor.Panel.define({
     <div class="controls">
         <button v-if="!recording" @click="start" class="btn btn-start">● 録画開始</button>
         <button v-else @click="stop" class="btn btn-stop" :disabled="stopping">■ 録画停止{{ stopping ? '中...' : '' }}</button>
-        <button @click="reset" class="btn btn-reset" title="録画状態と結果をクリア">🔄 リセット</button>
     </div>
 
     <div v-if="recording" class="status-row">
@@ -78,8 +77,6 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .btn-start:hover { background: #e55; }
 .btn-stop { background: #888; }
 .btn-stop:hover { background: #999; }
-.btn-reset { background: #555; padding: 10px 12px; margin-left: 8px; font-size: 12px; }
-.btn-reset:hover { background: #666; }
 .btn-small {
     padding: 4px 10px;
     background: #4a8;
@@ -234,12 +231,6 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     } catch (e: any) {
                         console.error("[PreviewRecorder] selectSaveFolder failed:", e);
                     }
-                },
-                reset(this: any) {
-                    this.lastResult = null;
-                    this.lastError = false;
-                    this.elapsed = "0.0";
-                    this.recordingInfo = "";
                 },
                 openSaveFolder(this: any) {
                     const path = require("path");

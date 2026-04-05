@@ -171,6 +171,7 @@ export class DebugTools implements ToolCategory {
                         quality: { type: "string", description: "'low'/'medium'/'high'/'ultra' (default: medium). Coefficients: 0.05/0.10/0.15/0.25" },
                         videoBitsPerSecond: { type: "number", description: "Explicit bitrate in bps. Overrides quality-based calculation." },
                         format: { type: "string", description: "'mp4' (default) or 'webm'. mp4 falls back to webm if not supported." },
+                        savePath: { type: "string", description: "Save directory (project-relative or absolute). Default: temp/recordings" },
                     },
                 },
             },
@@ -258,7 +259,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_batch_screenshot":
                     return this.batchScreenshot(args.pages, args.delay || 1000, args.maxWidth);
                 case "debug_record_start":
-                    return this.gameCommand("record_start", { fps: args.fps, quality: args.quality, videoBitsPerSecond: args.videoBitsPerSecond, format: args.format }, 5000);
+                    return this.gameCommand("record_start", { fps: args.fps, quality: args.quality, videoBitsPerSecond: args.videoBitsPerSecond, format: args.format, savePath: args.savePath }, 5000);
                 case "debug_record_stop":
                     return this.gameCommand("record_stop", undefined, args.timeout || 30000);
                 default:
