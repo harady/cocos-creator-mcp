@@ -28,6 +28,18 @@ module.exports = Editor.Panel.define({
         <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
     </div>
 
+    <div class="section-title">スクショ設定</div>
+    <div class="row">
+        <label>形式:</label>
+        <select v-model="shotFormat" :disabled="shooting">
+            <option value="webp">WebP</option>
+            <option value="png">PNG</option>
+        </select>
+        <label>最大幅:</label>
+        <input type="number" v-model.number="shotMaxWidth" :disabled="shooting" min="0" max="4096" step="100" title="0 = 原寸" />
+        <span class="unit">px (0=原寸)</span>
+    </div>
+
     <div class="section-title">録画設定</div>
     <div class="row">
         <label>FPS:</label>
@@ -140,6 +152,8 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     coefficient: 0.25,
                     format: "mp4",
                     savePath: "temp/recordings",
+                    shotFormat: "webp",
+                    shotMaxWidth: 0,
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -269,7 +283,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                 method: "tools/call",
                                 params: {
                                     name: "debug_game_command",
-                                    arguments: { type: "screenshot", args: {}, timeout: 5000, maxWidth: 0 },
+                                    arguments: { type: "screenshot", args: {}, timeout: 5000, maxWidth: this.shotMaxWidth, imageFormat: this.shotFormat },
                                 },
                             }),
                         });
