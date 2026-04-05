@@ -475,19 +475,6 @@ After building, reload the extension in Cocos Creator:
 - Cocos Creator 3.8+
 - Node.js 18+
 
-## Future Ideas (Preview Recorder)
-
-追加を検討している機能。現状の実装は「プロジェクトのネイティブ解像度で録画/スクショ」のシンプル構成だが、配布シナリオが増えたら対応したい。
-
-- **出力解像度プリセット (録画)**: YouTube投稿用 (1920x1080) 等、固定解像度にリサイズして書き出し。
-  canvas.captureStream の上流で OffscreenCanvas に縮小描画、または ffmpeg 後処理で対応。
-- **出力解像度プリセット (スクショ)**: App Store 納品用 (6.5" iPhone = 1242x2688 等) のサイズ指定。
-  既存の maxWidth と高さ指定を組み合わせる or アスペクト比指定リサイズ。
-- **動画フォーマット変換ユーティリティ**: WebM → MP4 を ffmpeg で変換するボタン。
-  （MediaRecorder の MP4 サポートはブラウザ依存のため、安定化のため WebM 録画 + 変換の選択肢）
-
-実装時は「プロジェクトに合うプリセット」の判断を使う側に委ねるため、プリセットセット自体をユーザー設定で定義できる形にすると汎用性が高い。
-
 ## License
 
 MIT
