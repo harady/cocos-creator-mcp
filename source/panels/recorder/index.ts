@@ -32,12 +32,14 @@ module.exports = Editor.Panel.define({
             <option value="mp4">MP4</option>
             <option value="webm">WebM</option>
         </select>
+        <button @click="resetQuality" class="btn btn-small" :disabled="recording" title="録画設定を初期値に戻す">↺</button>
     </div>
 
     <div class="row">
         <label>保存先:</label>
         <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
         <button @click="selectSaveFolder" class="btn btn-small" :disabled="recording">📁 選択</button>
+        <button @click="resetSavePath" class="btn btn-small" :disabled="recording" title="保存先を初期値に戻す">↺</button>
     </div>
     <div class="row">
         <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
@@ -208,6 +210,14 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         this.stopping = false;
                         if (this._timer) { clearInterval(this._timer); this._timer = null; }
                     }
+                },
+                resetQuality(this: any) {
+                    this.fps = 30;
+                    this.quality = "medium";
+                    this.format = "mp4";
+                },
+                resetSavePath(this: any) {
+                    this.savePath = "temp/recordings";
                 },
                 async selectSaveFolder(this: any) {
                     try {
