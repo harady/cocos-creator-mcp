@@ -162,6 +162,27 @@ export class DebugTools implements ToolCategory {
                 },
             },
             {
+                name: "debug_record_start",
+                description: "Start recording the game preview canvas to a WebM video file. Uses MediaRecorder on the game side (requires GameDebugClient with record_start handler). Returns recording id.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        fps: { type: "number", description: "Frames per second (default: 30)" },
+                        videoBitsPerSecond: { type: "number", description: "Bitrate in bps (default: 4000000)" },
+                    },
+                },
+            },
+            {
+                name: "debug_record_stop",
+                description: "Stop recording started by debug_record_start. Returns the saved WebM file path and size. Video is saved to project's temp/recordings/rec_<datetime>.webm.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        timeout: { type: "number", description: "Max wait time in ms for file upload (default: 30000)" },
+                    },
+                },
+            },
+            {
                 name: "debug_batch_screenshot",
                 description: "Navigate to multiple pages and take a screenshot of each. Requires game preview running with GameDebugClient. Returns an array of screenshot file paths.",
                 inputSchema: {
@@ -234,6 +255,10 @@ export class DebugTools implements ToolCategory {
                     return this.getExtensionInfo(args.name);
                 case "debug_batch_screenshot":
                     return this.batchScreenshot(args.pages, args.delay || 1000, args.maxWidth);
+                case "debug_record_start":
+                    return this.gameCommand("record_start", { fps: args.fps, videoBitsPerSecond: args.videoBitsPerSecond }, 5000);
+                case "debug_record_stop":
+                    return this.gameCommand("record_stop", undefined, args.timeout || 30000);
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }
