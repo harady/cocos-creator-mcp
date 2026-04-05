@@ -104,7 +104,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     recordingInfo: "",
                     fps: 30,
                     quality: "medium",
-                    format: "webm",
+                    format: "mp4",
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,

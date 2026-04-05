@@ -191,7 +191,7 @@ function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; qual
         const coef = QUALITY_PRESETS[quality] ?? QUALITY_PRESETS.medium;
         const autoBps = Math.round(canvas.width * canvas.height * fps * coef);
         const bps = args?.videoBitsPerSecond ?? autoBps;
-        const format = args?.format ?? "webm";
+        const format = args?.format ?? "mp4";
         _recordStream = canvas.captureStream(fps);
         _recordChunks = [];
         _recordId = `rec_${new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").substring(0, 19)}`;
