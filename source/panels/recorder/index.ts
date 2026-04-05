@@ -215,32 +215,46 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     this.elapsed = "0.0";
                     this.recordingInfo = "";
                 },
-                openSaveFolder(this: any) {
+                async openSaveFolder(this: any) {
                     const path = require("path");
                     const fs = require("fs");
                     const projectPath = Editor.Project.path;
                     let dir = this.savePath || "temp/recordings";
                     if (!path.isAbsolute(dir)) dir = path.join(projectPath, dir);
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                    const normalized = dir.replace(/\//g, "\\");
+                    console.log("[PreviewRecorder] openSaveFolder:", normalized);
+                    // 1. Electron shell.openPath (推奨)
                     try {
                         const { shell } = require("electron");
                         if (shell?.openPath) {
-                            shell.openPath(dir);
-                            return;
+                            const errMsg = await shell.openPath(normalized);
+                            if (errMsg) {
+                                console.warn("[PreviewRecorder] shell.openPath error:", errMsg);
+                            } else {
+                                return;
+                            }
                         }
-                    } catch (e) { /* fallback */ }
+                    } catch (e: any) {
+                        console.warn("[PreviewRecorder] shell unavailable:", e.message);
+                    }
+                    // 2. child_process fallback
                     try {
                         const { exec } = require("child_process");
                         const platform = process.platform;
-                        if (platform === "win32") {
-                            exec(`explorer.exe "${dir.replace(/\//g, "\\")}"`);
-                        } else if (platform === "darwin") {
-                            exec(`open "${dir}"`);
-                        } else {
-                            exec(`xdg-open "${dir}"`);
-                        }
+                        const cmd = platform === "win32"
+                            ? `explorer.exe "${normalized}"`
+                            : platform === "darwin"
+                            ? `open "${dir}"`
+                            : `xdg-open "${dir}"`;
+                        console.log("[PreviewRecorder] exec:", cmd);
+                        exec(cmd, (err: any) => {
+                            if (err) console.warn("[PreviewRecorder] exec error:", err.message);
+                        });
                     } catch (e: any) {
                         console.error("[PreviewRecorder] openSaveFolder failed:", e);
+                        this.lastResult = { error: `フォルダを開けませんでした: ${e.message}` };
+                        this.lastError = true;
                     }
                 },
                 openFolder(this: any) {
