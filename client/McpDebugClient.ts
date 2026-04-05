@@ -183,7 +183,7 @@ function startRecording(args?: { fps?: number; videoBitsPerSecond?: number }): {
         const bps = args?.videoBitsPerSecond ?? 4_000_000;
         _recordStream = canvas.captureStream(fps);
         _recordChunks = [];
-        _recordId = `rec_${Date.now()}`;
+        _recordId = `rec_${new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").substring(0, 19)}`;
 
         // VP9→VP8→webmの順でフォールバック
         const candidates = [
