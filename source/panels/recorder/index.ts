@@ -200,9 +200,29 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 },
                 openFolder(this: any) {
                     if (!this.lastResult?.path) return;
-                    const path = require("path");
-                    const { shell } = require("electron");
-                    shell.showItemInFolder(this.lastResult.path);
+                    const filePath = this.lastResult.path;
+                    try {
+                        const { shell } = require("electron");
+                        if (shell?.showItemInFolder) {
+                            shell.showItemInFolder(filePath);
+                            return;
+                        }
+                    } catch (e) { /* fallback */ }
+                    // フォールバック: OS別コマンド
+                    try {
+                        const { exec } = require("child_process");
+                        const platform = process.platform;
+                        if (platform === "win32") {
+                            exec(`explorer.exe /select,"${filePath.replace(/\//g, "\\")}"`);
+                        } else if (platform === "darwin") {
+                            exec(`open -R "${filePath}"`);
+                        } else {
+                            const dir = require("path").dirname(filePath);
+                            exec(`xdg-open "${dir}"`);
+                        }
+                    } catch (e: any) {
+                        console.error("[PreviewRecorder] openFolder failed:", e);
+                    }
                 },
             },
         });
