@@ -171,7 +171,14 @@ let _recordChunks: Blob[] = [];
 let _recordStream: MediaStream | null = null;
 let _recordId: string | null = null;
 
-function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; format?: "webm" | "mp4" }): { success: boolean; error?: string; data?: any } {
+const QUALITY_PRESETS: Record<string, number> = {
+    low: 0.05,
+    medium: 0.10,
+    high: 0.15,
+    ultra: 0.25,
+};
+
+function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; quality?: string; format?: "webm" | "mp4" }): { success: boolean; error?: string; data?: any } {
     if (_mediaRecorder) return { success: false, error: "already recording" };
     try {
         // GameView canvas取得
@@ -180,7 +187,10 @@ function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; form
         if (!canvas) return { success: false, error: "canvas not found" };
 
         const fps = args?.fps ?? 30;
-        const bps = args?.videoBitsPerSecond ?? 4_000_000;
+        const quality = args?.quality ?? "medium";
+        const coef = QUALITY_PRESETS[quality] ?? QUALITY_PRESETS.medium;
+        const autoBps = Math.round(canvas.width * canvas.height * fps * coef);
+        const bps = args?.videoBitsPerSecond ?? autoBps;
         const format = args?.format ?? "webm";
         _recordStream = canvas.captureStream(fps);
         _recordChunks = [];
@@ -214,7 +224,7 @@ function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; form
             if (e.data.size > 0) _recordChunks.push(e.data);
         };
         _mediaRecorder.start();
-        return { success: true, data: { id: _recordId, mimeType, fps, canvasWidth: canvas.width, canvasHeight: canvas.height } };
+        return { success: true, data: { id: _recordId, mimeType, fps, videoBitsPerSecond: bps, quality, canvasWidth: canvas.width, canvasHeight: canvas.height } };
     } catch (e: any) {
         _mediaRecorder = null;
         _recordStream = null;

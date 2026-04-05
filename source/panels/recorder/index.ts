@@ -20,8 +20,13 @@ module.exports = Editor.Panel.define({
     <div class="row">
         <label>FPS:</label>
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
-        <label>ビットレート(Mbps):</label>
-        <input type="number" v-model.number="bitrateMbps" :disabled="recording" min="1" max="20" step="0.5" />
+        <label>品質:</label>
+        <select v-model="quality" :disabled="recording">
+            <option value="low">Low (0.05×)</option>
+            <option value="medium">Medium (0.10×)</option>
+            <option value="high">High (0.15×)</option>
+            <option value="ultra">Ultra (0.25×)</option>
+        </select>
         <label>形式:</label>
         <select v-model="format" :disabled="recording">
             <option value="webm">WebM</option>
@@ -98,7 +103,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     elapsed: "0.0",
                     recordingInfo: "",
                     fps: 30,
-                    bitrateMbps: 4,
+                    quality: "medium",
                     format: "webm",
                     lastResult: null as any,
                     lastError: false,
@@ -121,7 +126,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                     name: "debug_record_start",
                                     arguments: {
                                         fps: this.fps,
-                                        videoBitsPerSecond: Math.round(this.bitrateMbps * 1_000_000),
+                                        quality: this.quality,
                                         format: this.format,
                                     },
                                 },
@@ -132,7 +137,9 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         const parsed = content ? JSON.parse(content) : null;
                         if (parsed?.success && parsed.data?.success) {
                             this.recording = true;
-                            this.recordingInfo = `${parsed.data.data?.canvasWidth || "?"}x${parsed.data.data?.canvasHeight || "?"} / ${parsed.data.data?.mimeType || ""}`;
+                            const d = parsed.data.data;
+                            const mbps = d?.videoBitsPerSecond ? (d.videoBitsPerSecond / 1_000_000).toFixed(2) : "?";
+                            this.recordingInfo = `${d?.canvasWidth || "?"}x${d?.canvasHeight || "?"} @ ${d?.fps || "?"}fps / ${mbps}Mbps / ${d?.mimeType || ""}`;
                             this._startTime = Date.now();
                             this._timer = setInterval(() => {
                                 this.elapsed = ((Date.now() - this._startTime) / 1000).toFixed(1);

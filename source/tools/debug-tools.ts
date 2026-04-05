@@ -163,12 +163,13 @@ export class DebugTools implements ToolCategory {
             },
             {
                 name: "debug_record_start",
-                description: "Start recording the game preview canvas to a video file. Uses MediaRecorder on the game side (requires GameDebugClient with record_start handler). Returns recording id. Format defaults to webm (most compatible); mp4 is attempted if supported, falling back to webm.",
+                description: "Start recording the game preview canvas to a video file. Uses MediaRecorder on the game side. Bitrate is auto-calculated from canvas resolution × fps × quality coefficient unless videoBitsPerSecond is set explicitly.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         fps: { type: "number", description: "Frames per second (default: 30)" },
-                        videoBitsPerSecond: { type: "number", description: "Bitrate in bps (default: 4000000)" },
+                        quality: { type: "string", description: "'low'/'medium'/'high'/'ultra' (default: medium). Coefficients: 0.05/0.10/0.15/0.25" },
+                        videoBitsPerSecond: { type: "number", description: "Explicit bitrate in bps. Overrides quality-based calculation." },
                         format: { type: "string", description: "'webm' (default) or 'mp4'. mp4 falls back to webm if not supported." },
                     },
                 },
@@ -257,7 +258,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_batch_screenshot":
                     return this.batchScreenshot(args.pages, args.delay || 1000, args.maxWidth);
                 case "debug_record_start":
-                    return this.gameCommand("record_start", { fps: args.fps, videoBitsPerSecond: args.videoBitsPerSecond, format: args.format }, 5000);
+                    return this.gameCommand("record_start", { fps: args.fps, quality: args.quality, videoBitsPerSecond: args.videoBitsPerSecond, format: args.format }, 5000);
                 case "debug_record_stop":
                     return this.gameCommand("record_stop", undefined, args.timeout || 30000);
                 default:
