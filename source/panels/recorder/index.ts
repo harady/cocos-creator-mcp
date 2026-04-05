@@ -22,11 +22,15 @@ module.exports = Editor.Panel.define({
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
         <label>品質:</label>
         <select v-model="quality" :disabled="recording">
-            <option value="low">低</option>
-            <option value="medium">中</option>
-            <option value="high">高</option>
-            <option value="ultra">最高</option>
+            <option value="low">低 (×0.08)</option>
+            <option value="medium">中 (×0.15)</option>
+            <option value="high">高 (×0.25)</option>
+            <option value="ultra">最高 (×0.40)</option>
+            <option value="custom">カスタム</option>
         </select>
+        <input v-if="quality === 'custom'" type="number" v-model.number="customBitrateMbps"
+               :disabled="recording" min="0.1" max="50" step="0.1" title="Mbps" class="custom-bitrate" />
+        <span v-if="quality === 'custom'" class="unit">Mbps</span>
         <label>形式:</label>
         <select v-model="format" :disabled="recording">
             <option value="mp4">MP4</option>
@@ -96,6 +100,8 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .row input { width: 60px; padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
 .row select { padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
 .path-input { flex: 1; min-width: 200px; width: auto !important; font-family: monospace; }
+.custom-bitrate { width: 70px !important; }
+.unit { font-size: 11px; color: #888; }
 .result { margin: 12px 0; padding: 10px; border-radius: 4px; font-size: 12px; line-height: 1.5; }
 .result.success { background: #1a3a1a; color: #afa; }
 .result.error { background: #3a1a1a; color: #faa; }
@@ -115,6 +121,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     recordingInfo: "",
                     fps: 30,
                     quality: "medium",
+                    customBitrateMbps: 2.0,
                     format: "mp4",
                     savePath: "temp/recordings",
                     lastResult: null as any,
@@ -139,7 +146,10 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                     name: "debug_record_start",
                                     arguments: {
                                         fps: this.fps,
-                                        quality: this.quality,
+                                        quality: this.quality === "custom" ? "medium" : this.quality,
+                                        videoBitsPerSecond: this.quality === "custom"
+                                            ? Math.round(this.customBitrateMbps * 1_000_000)
+                                            : undefined,
                                         format: this.format,
                                         savePath: this.savePath,
                                     },
