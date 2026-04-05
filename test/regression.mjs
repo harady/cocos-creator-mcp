@@ -62,7 +62,7 @@ const ALL_TOOLS = [
     "debug_get_editor_info", "debug_get_extension_info", "debug_get_log_file_info",
     "debug_get_project_logs", "debug_list_extensions", "debug_list_messages",
     "debug_open_url", "debug_query_devices", "debug_search_project_logs", "debug_validate_scene",
-    "debug_batch_screenshot",
+    "debug_batch_screenshot", "debug_record_start", "debug_record_stop",
     "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
     "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
     "node_set_property", "node_set_transform",
@@ -664,6 +664,19 @@ async function testV16NewTools() {
     assert(!!syncTool, "server_check_code_sync registered");
 }
 
+async function testV18NewTools() {
+    console.log("\n── v1.8 new tools (preview recorder) ──");
+
+    // 1. debug_record_start registered
+    const toolsList = await callMcp("tools/list", {});
+    const startTool = toolsList.result?.tools?.find((t) => t.name === "debug_record_start");
+    assert(!!startTool, "debug_record_start registered");
+
+    // 2. debug_record_stop registered
+    const stopTool = toolsList.result?.tools?.find((t) => t.name === "debug_record_stop");
+    assert(!!stopTool, "debug_record_stop registered");
+}
+
 // ── runner ──
 
 async function main() {
@@ -701,6 +714,7 @@ async function main() {
     await testV15NewTools();
     await testNewEditorAPIs();
     await testV16NewTools();
+    await testV18NewTools();
 
     console.log(`\n${"═".repeat(40)}`);
     console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);
