@@ -271,9 +271,13 @@ export class ComponentTools implements ToolCategory {
         if (typeof value === "boolean") return { value, type: "Boolean" };
 
         // オブジェクト形式 {uuid: "xxx", type: "cc.Node"} はそのまま
+        // type 指定なしの {uuid: "xxx"} はプロパティの実際の型を解決するため文字列扱いに変換する
         if (value !== null && typeof value === "object" && typeof value.uuid === "string") {
-            const refType = typeof value.type === "string" ? value.type : "cc.Node";
-            return { type: refType, value: { uuid: value.uuid } };
+            if (typeof value.type === "string") {
+                return { type: value.type, value: { uuid: value.uuid } };
+            }
+            // type 未指定: 文字列として処理してプロパティ型から解決
+            value = value.uuid;
         }
 
         // @path: プレフィックスの場合: パスからノードUUIDを解決
