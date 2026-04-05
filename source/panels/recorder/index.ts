@@ -10,6 +10,7 @@ module.exports = Editor.Panel.define({
     <div class="controls">
         <button v-if="!recording" @click="start" class="btn btn-start">● 録画開始</button>
         <button v-else @click="stop" class="btn btn-stop" :disabled="stopping">■ 録画停止{{ stopping ? '中...' : '' }}</button>
+        <button @click="screenshot" class="btn btn-shot" :disabled="shooting">📸 スクショ{{ shooting ? '中...' : '' }}</button>
     </div>
 
     <div v-if="recording" class="status-row">
@@ -53,9 +54,9 @@ module.exports = Editor.Panel.define({
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
         <div v-if="!lastError">
-            <strong>✓ 録画完了</strong><br>
+            <strong>✓ {{ lastResult.kind === 'shot' ? 'スクショ保存' : '録画完了' }}</strong><br>
             <code>{{ lastResult.path }}</code><br>
-            {{ (lastResult.size / 1024 / 1024).toFixed(2) }} MB
+            {{ (lastResult.size / 1024).toFixed(1) }} KB
         </div>
         <div v-else>
             <strong>✗ エラー:</strong> {{ lastResult.error || lastResult.message || 'unknown' }}
@@ -85,6 +86,8 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .btn-start:hover { background: #e55; }
 .btn-stop { background: #888; }
 .btn-stop:hover { background: #999; }
+.btn-shot { background: #468; margin-left: 8px; }
+.btn-shot:hover { background: #579; }
 .btn-small {
     padding: 4px 10px;
     background: #4a8;
@@ -119,6 +122,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 return {
                     recording: false,
                     stopping: false,
+                    shooting: false,
                     elapsed: "0.0",
                     recordingInfo: "",
                     fps: 30,
@@ -242,6 +246,51 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 },
                 resetSavePath(this: any) {
                     this.savePath = "temp/recordings";
+                },
+                async screenshot(this: any) {
+                    this.shooting = true;
+                    try {
+                        const res = await fetch(`${MCP_BASE}/mcp`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                jsonrpc: "2.0",
+                                id: 3,
+                                method: "tools/call",
+                                params: {
+                                    name: "debug_game_command",
+                                    arguments: { type: "screenshot", args: {}, timeout: 5000, maxWidth: 0 },
+                                },
+                            }),
+                        });
+                        const json = await res.json();
+                        const content = json.result?.content?.[0]?.text;
+                        const parsed = content ? JSON.parse(content) : null;
+                        if (parsed?.success && parsed.path) {
+                            // savePath 配下にコピー
+                            const fs = require("fs");
+                            const path = require("path");
+                            const projectPath = Editor.Project.path;
+                            let destDir = this.savePath || "temp/recordings";
+                            if (!path.isAbsolute(destDir)) destDir = path.join(projectPath, destDir);
+                            if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+                            const ts = new Date().toISOString().replace(/[:.]/g, "-");
+                            const ext = path.extname(parsed.path) || ".png";
+                            const destPath = path.join(destDir, `screenshot_${ts}${ext}`);
+                            fs.copyFileSync(parsed.path, destPath);
+                            this.lastResult = { kind: "shot", path: destPath, size: parsed.size };
+                            this.lastError = false;
+                        } else {
+                            const errDetail = parsed?.error || parsed?.message || "スクショ失敗";
+                            this.lastResult = { error: errDetail };
+                            this.lastError = true;
+                        }
+                    } catch (e: any) {
+                        this.lastResult = { error: `通信エラー: ${e.message}` };
+                        this.lastError = true;
+                    } finally {
+                        this.shooting = false;
+                    }
                 },
                 async checkPreviewAlive(this: any) {
                     if (!this.recording) return;
