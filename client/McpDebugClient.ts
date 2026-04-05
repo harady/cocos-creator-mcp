@@ -179,7 +179,15 @@ const QUALITY_PRESETS: Record<string, number> = {
 };
 
 function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; quality?: string; format?: "webm" | "mp4" }): { success: boolean; error?: string; data?: any } {
-    if (_mediaRecorder) return { success: false, error: "already recording" };
+    // 前回の録画状態が残っていたら強制クリア
+    if (_mediaRecorder) {
+        try { if (_mediaRecorder.state !== "inactive") _mediaRecorder.stop(); } catch {}
+        _recordStream?.getTracks().forEach(t => { try { t.stop(); } catch {} });
+        _mediaRecorder = null;
+        _recordStream = null;
+        _recordChunks = [];
+        _recordId = null;
+    }
     try {
         // GameView canvas取得
         const canvas = document.getElementById("GameCanvas") as HTMLCanvasElement
