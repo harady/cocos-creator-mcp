@@ -168,7 +168,7 @@ export class DebugTools implements ToolCategory {
                     type: "object",
                     properties: {
                         fps: { type: "number", description: "Frames per second (default: 30)" },
-                        quality: { type: "string", description: "'low'/'medium'/'high'/'ultra' (default: medium). Coefficients: 0.08/0.15/0.25/0.40" },
+                        quality: { type: "string", description: "'low'/'medium'/'high'/'ultra' (default: medium). Coefficients: 0.15/0.25/0.40/0.60" },
                         coefficient: { type: "number", description: "Custom bitrate coefficient (width × height × fps × coefficient). Overrides quality." },
                         videoBitsPerSecond: { type: "number", description: "Explicit bitrate in bps. Overrides quality-based calculation." },
                         format: { type: "string", description: "'mp4' (default) or 'webm'. mp4 falls back to webm if not supported." },

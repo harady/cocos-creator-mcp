@@ -123,7 +123,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     recordingInfo: "",
                     fps: 30,
                     quality: "medium",
-                    coefficient: 0.15,
+                    coefficient: 0.25,
                     format: "mp4",
                     savePath: "temp/recordings",
                     lastResult: null as any,
@@ -227,17 +227,17 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     }
                 },
                 onQualityChange(this: any) {
-                    const map: Record<string, number> = { low: 0.08, medium: 0.15, high: 0.25, ultra: 0.40 };
+                    const map: Record<string, number> = { low: 0.15, medium: 0.25, high: 0.40, ultra: 0.60 };
                     if (this.quality !== "custom") this.coefficient = map[this.quality];
                 },
                 onCoefChange(this: any) {
-                    const map: Record<number, string> = { 0.08: "low", 0.15: "medium", 0.25: "high", 0.40: "ultra" };
+                    const map: Record<number, string> = { 0.15: "low", 0.25: "medium", 0.40: "high", 0.60: "ultra" };
                     this.quality = map[this.coefficient] || "custom";
                 },
                 resetQuality(this: any) {
                     this.fps = 30;
                     this.quality = "medium";
-                    this.coefficient = 0.15;
+                    this.coefficient = 0.25;
                     this.format = "mp4";
                 },
                 resetSavePath(this: any) {
