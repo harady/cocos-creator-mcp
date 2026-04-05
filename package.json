@@ -8,7 +8,7 @@
         "build": "tsc && node scripts/postbuild.js",
         "watch": "tsc -w"
     },
-    "description": "MCP Server for Cocos Creator [319b53b826c6]",
+    "description": "MCP Server for Cocos Creator [f619621de50d]",
     "main": "./dist/main.js",
     "dependencies": {
         "vue": "^3.1.4",

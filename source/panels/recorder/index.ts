@@ -21,16 +21,16 @@ module.exports = Editor.Panel.define({
         <label>FPS:</label>
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
         <label>品質:</label>
-        <select v-model="quality" :disabled="recording">
-            <option value="low">低 (×0.08)</option>
-            <option value="medium">中 (×0.15)</option>
-            <option value="high">高 (×0.25)</option>
-            <option value="ultra">最高 (×0.40)</option>
+        <select v-model="quality" @change="onQualityChange" :disabled="recording">
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+            <option value="ultra">最高</option>
             <option value="custom">カスタム</option>
         </select>
-        <input v-if="quality === 'custom'" type="number" v-model.number="customBitrateMbps"
-               :disabled="recording" min="0.1" max="50" step="0.1" title="Mbps" class="custom-bitrate" />
-        <span v-if="quality === 'custom'" class="unit">Mbps</span>
+        <label>係数:</label>
+        <input type="number" v-model.number="coefficient" @input="onCoefChange"
+               :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate" />
         <label>形式:</label>
         <select v-model="format" :disabled="recording">
             <option value="mp4">MP4</option>
@@ -121,7 +121,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     recordingInfo: "",
                     fps: 30,
                     quality: "medium",
-                    customBitrateMbps: 2.0,
+                    coefficient: 0.15,
                     format: "mp4",
                     savePath: "temp/recordings",
                     lastResult: null as any,
@@ -146,10 +146,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                     name: "debug_record_start",
                                     arguments: {
                                         fps: this.fps,
-                                        quality: this.quality === "custom" ? "medium" : this.quality,
-                                        videoBitsPerSecond: this.quality === "custom"
-                                            ? Math.round(this.customBitrateMbps * 1_000_000)
-                                            : undefined,
+                                        coefficient: this.coefficient,
                                         format: this.format,
                                         savePath: this.savePath,
                                     },
@@ -227,9 +224,18 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         if (this._aliveCheckTimer) { clearInterval(this._aliveCheckTimer); this._aliveCheckTimer = null; }
                     }
                 },
+                onQualityChange(this: any) {
+                    const map: Record<string, number> = { low: 0.08, medium: 0.15, high: 0.25, ultra: 0.40 };
+                    if (this.quality !== "custom") this.coefficient = map[this.quality];
+                },
+                onCoefChange(this: any) {
+                    const map: Record<number, string> = { 0.08: "low", 0.15: "medium", 0.25: "high", 0.40: "ultra" };
+                    this.quality = map[this.coefficient] || "custom";
+                },
                 resetQuality(this: any) {
                     this.fps = 30;
                     this.quality = "medium";
+                    this.coefficient = 0.15;
                     this.format = "mp4";
                 },
                 resetSavePath(this: any) {

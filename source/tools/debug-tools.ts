@@ -169,6 +169,7 @@ export class DebugTools implements ToolCategory {
                     properties: {
                         fps: { type: "number", description: "Frames per second (default: 30)" },
                         quality: { type: "string", description: "'low'/'medium'/'high'/'ultra' (default: medium). Coefficients: 0.08/0.15/0.25/0.40" },
+                        coefficient: { type: "number", description: "Custom bitrate coefficient (width × height × fps × coefficient). Overrides quality." },
                         videoBitsPerSecond: { type: "number", description: "Explicit bitrate in bps. Overrides quality-based calculation." },
                         format: { type: "string", description: "'mp4' (default) or 'webm'. mp4 falls back to webm if not supported." },
                         savePath: { type: "string", description: "Save directory (project-relative or absolute). Default: temp/recordings" },
@@ -259,7 +260,7 @@ export class DebugTools implements ToolCategory {
                 case "debug_batch_screenshot":
                     return this.batchScreenshot(args.pages, args.delay || 1000, args.maxWidth);
                 case "debug_record_start":
-                    return this.gameCommand("record_start", { fps: args.fps, quality: args.quality, videoBitsPerSecond: args.videoBitsPerSecond, format: args.format, savePath: args.savePath }, 5000);
+                    return this.gameCommand("record_start", { fps: args.fps, quality: args.quality, coefficient: args.coefficient, videoBitsPerSecond: args.videoBitsPerSecond, format: args.format, savePath: args.savePath }, 5000);
                 case "debug_record_stop":
                     return this.gameCommand("record_stop", undefined, args.timeout || 30000);
                 default:

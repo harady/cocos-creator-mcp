@@ -178,7 +178,7 @@ const QUALITY_PRESETS: Record<string, number> = {
     ultra: 0.40,
 };
 
-function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; quality?: string; format?: "webm" | "mp4" }): { success: boolean; error?: string; data?: any } {
+function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; quality?: string; coefficient?: number; format?: "webm" | "mp4" }): { success: boolean; error?: string; data?: any } {
     // 前回の録画状態が残っていたら強制クリア
     if (_mediaRecorder) {
         try { if (_mediaRecorder.state !== "inactive") _mediaRecorder.stop(); } catch {}
@@ -196,7 +196,7 @@ function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; qual
 
         const fps = args?.fps ?? 30;
         const quality = args?.quality ?? "medium";
-        const coef = QUALITY_PRESETS[quality] ?? QUALITY_PRESETS.medium;
+        const coef = args?.coefficient ?? QUALITY_PRESETS[quality] ?? QUALITY_PRESETS.medium;
         const autoBps = Math.round(canvas.width * canvas.height * fps * coef);
         const bps = args?.videoBitsPerSecond ?? autoBps;
         const format = args?.format ?? "mp4";
