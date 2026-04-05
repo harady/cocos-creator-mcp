@@ -135,9 +135,9 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         const json = await res.json();
                         const content = json.result?.content?.[0]?.text;
                         const parsed = content ? JSON.parse(content) : null;
-                        if (parsed?.success && parsed.data?.success) {
+                        if (parsed?.success && parsed.data?.id) {
                             this.recording = true;
-                            const d = parsed.data.data;
+                            const d = parsed.data;
                             const mbps = d?.videoBitsPerSecond ? (d.videoBitsPerSecond / 1_000_000).toFixed(2) : "?";
                             this.recordingInfo = `${d?.canvasWidth || "?"}x${d?.canvasHeight || "?"} @ ${d?.fps || "?"}fps / ${mbps}Mbps / ${d?.mimeType || ""}`;
                             this._startTime = Date.now();
@@ -145,7 +145,13 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                 this.elapsed = ((Date.now() - this._startTime) / 1000).toFixed(1);
                             }, 100);
                         } else {
-                            this.lastResult = { error: parsed?.data?.error || parsed?.error || "録画開始失敗" };
+                            // 可能な限り詳細なエラー情報を表示
+                            const errDetail = parsed?.data?.error
+                                || parsed?.error
+                                || (parsed?.data ? JSON.stringify(parsed.data) : null)
+                                || (parsed ? JSON.stringify(parsed).substring(0, 200) : "no response")
+                                || "録画開始失敗";
+                            this.lastResult = { error: errDetail };
                             this.lastError = true;
                         }
                     } catch (e: any) {
@@ -172,11 +178,15 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         const json = await res.json();
                         const content = json.result?.content?.[0]?.text;
                         const parsed = content ? JSON.parse(content) : null;
-                        if (parsed?.success && parsed.data?.success) {
-                            this.lastResult = { path: parsed.data.data?.path, size: parsed.data.data?.size };
+                        if (parsed?.success && parsed.data?.path) {
+                            this.lastResult = { path: parsed.data.path, size: parsed.data.size };
                             this.lastError = false;
                         } else {
-                            this.lastResult = { error: parsed?.data?.error || parsed?.error || "録画停止失敗" };
+                            const errDetail = parsed?.data?.error
+                                || parsed?.error
+                                || (parsed?.data ? JSON.stringify(parsed.data) : null)
+                                || "録画停止失敗";
+                            this.lastResult = { error: errDetail };
                             this.lastError = true;
                         }
                     } catch (e: any) {
