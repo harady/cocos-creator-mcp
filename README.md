@@ -475,6 +475,10 @@ After building, reload the extension in Cocos Creator:
 - Cocos Creator 3.8+
 - Node.js 18+
 
+## Known Limitations
+
+- **`scene_create`**: Does not work on Cocos Creator 3.8.x because the underlying `scene:new-scene` Editor message is not exposed on that version. As a workaround, create the `.scene` JSON file directly under `db://assets/` and call `project_refresh_assets` so the editor picks it up. See [#13](https://github.com/harady/cocos-creator-mcp/issues/13) for details.
+
 ## License
 
 MIT

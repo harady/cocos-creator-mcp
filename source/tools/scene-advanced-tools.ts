@@ -303,8 +303,23 @@ export class SceneAdvancedTools implements ToolCategory {
                     return ok({ success: true, result });
                 }
                 case "scene_create":
-                    await (Editor.Message.request as any)("scene", "new-scene");
-                    return ok({ success: true });
+                    try {
+                        await (Editor.Message.request as any)("scene", "new-scene");
+                        return ok({ success: true });
+                    } catch (e: any) {
+                        const msg = e?.message || String(e);
+                        // Cocos Creator 3.8.x does not expose the scene:new-scene message
+                        if (msg.includes("Message does not exist") || msg.includes("scene - new-scene")) {
+                            return err(
+                                "scene_create is not supported on this Cocos Creator version " +
+                                "(scene:new-scene message is unavailable). " +
+                                "Workaround: write a .scene JSON file directly to db://assets/ and " +
+                                "call project_refresh_assets to let the editor pick it up. " +
+                                "See: https://github.com/harady/cocos-creator-mcp/issues/13",
+                            );
+                        }
+                        return err(msg);
+                    }
                 case "scene_cut_node":
                     await (Editor.Message.request as any)("scene", "cut-node", args.uuid);
                     return ok({ success: true, uuid: args.uuid });
