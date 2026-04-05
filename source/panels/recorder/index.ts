@@ -18,28 +18,6 @@ module.exports = Editor.Panel.define({
         <span class="info">{{ recordingInfo }}</span>
     </div>
 
-    <div class="section-title">保存先</div>
-    <div class="row">
-        <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
-        <button @click="selectSaveFolder" class="btn btn-small" :disabled="recording">📁 選択</button>
-        <button @click="resetSavePath" class="btn btn-small" :disabled="recording" title="保存先を初期値に戻す">↺</button>
-    </div>
-    <div class="row">
-        <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
-    </div>
-
-    <div class="section-title">スクショ設定</div>
-    <div class="row">
-        <label>形式:</label>
-        <select v-model="shotFormat" :disabled="shooting">
-            <option value="webp">WebP</option>
-            <option value="png">PNG</option>
-        </select>
-        <label>最大幅:</label>
-        <input type="number" v-model.number="shotMaxWidth" :disabled="shooting" min="0" max="4096" step="100" title="0 = 原寸" />
-        <span class="unit">px (0=原寸)</span>
-    </div>
-
     <div class="section-title">録画設定</div>
     <div class="row">
         <label>FPS:</label>
@@ -63,6 +41,28 @@ module.exports = Editor.Panel.define({
         <input type="number" v-model.number="coefficient" @input="onCoefChange"
                :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate" />
         <button @click="resetQuality" class="btn btn-small" :disabled="recording" title="録画設定を初期値に戻す">↺</button>
+    </div>
+
+    <div class="section-title">スクショ設定</div>
+    <div class="row">
+        <label>形式:</label>
+        <select v-model="shotFormat" :disabled="shooting">
+            <option value="webp">WebP</option>
+            <option value="png">PNG</option>
+        </select>
+        <label>最大幅:</label>
+        <input type="number" v-model.number="shotMaxWidth" :disabled="shooting" min="0" max="4096" step="100" title="0 = 原寸" />
+        <span class="unit">px (0=原寸)</span>
+    </div>
+
+    <div class="section-title">保存先</div>
+    <div class="row">
+        <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
+        <button @click="selectSaveFolder" class="btn btn-small" :disabled="recording">📁 選択</button>
+        <button @click="resetSavePath" class="btn btn-small" :disabled="recording" title="保存先を初期値に戻す">↺</button>
+    </div>
+    <div class="row">
+        <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
     </div>
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
