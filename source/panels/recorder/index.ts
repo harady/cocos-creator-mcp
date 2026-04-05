@@ -20,6 +20,13 @@ module.exports = Editor.Panel.define({
     <div class="row">
         <label>FPS:</label>
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
+        <label>形式:</label>
+        <select v-model="format" :disabled="recording">
+            <option value="mp4">MP4</option>
+            <option value="webm">WebM</option>
+        </select>
+    </div>
+    <div class="row">
         <label>品質:</label>
         <select v-model="quality" @change="onQualityChange" :disabled="recording">
             <option value="low">低</option>
@@ -31,11 +38,6 @@ module.exports = Editor.Panel.define({
         <label>係数:</label>
         <input type="number" v-model.number="coefficient" @input="onCoefChange"
                :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate" />
-        <label>形式:</label>
-        <select v-model="format" :disabled="recording">
-            <option value="mp4">MP4</option>
-            <option value="webm">WebM</option>
-        </select>
         <button @click="resetQuality" class="btn btn-small" :disabled="recording" title="録画設定を初期値に戻す">↺</button>
     </div>
 
@@ -95,7 +97,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .rec-dot { color: #f44; animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: 0.3; } }
 .info { color: #888; font-size: 11px; margin-left: 8px; }
-.row { margin: 10px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row { margin: 10px 0; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .row label { font-size: 12px; }
 .row input { width: 60px; padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
 .row select { padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
