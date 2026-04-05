@@ -29,8 +29,8 @@ module.exports = Editor.Panel.define({
         </select>
         <label>形式:</label>
         <select v-model="format" :disabled="recording">
+            <option value="mp4">MP4</option>
             <option value="webm">WebM</option>
-            <option value="mp4">MP4 (対応時のみ)</option>
         </select>
     </div>
 
