@@ -306,21 +306,17 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     let dir = this.savePath || "temp/recordings";
                     if (!path.isAbsolute(dir)) dir = path.join(projectPath, dir);
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                    const normalized = dir.replace(/\//g, "\\");
-                    console.log("[PreviewRecorder] openSaveFolder:", normalized);
+                    // spawn+detachedで高速に起動（execの新規shellコストを回避）
                     try {
-                        const { exec } = require("child_process");
+                        const { spawn } = require("child_process");
                         const platform = process.platform;
-                        const cmd = platform === "win32"
-                            ? `explorer.exe "${normalized}"`
+                        const [cmd, ...args] = platform === "win32"
+                            ? ["explorer.exe", dir.replace(/\//g, "\\")]
                             : platform === "darwin"
-                            ? `open "${dir}"`
-                            : `xdg-open "${dir}"`;
-                        console.log("[PreviewRecorder] exec:", cmd);
-                        exec(cmd, (err: any, stdout: any, stderr: any) => {
-                            // explorer.exe は開けても終了コードが1になることがある
-                            console.log("[PreviewRecorder] exec done. err:", err?.message, "stderr:", stderr);
-                        });
+                            ? ["open", dir]
+                            : ["xdg-open", dir];
+                        const p = spawn(cmd, args, { detached: true, stdio: "ignore" });
+                        p.unref();
                     } catch (e: any) {
                         console.error("[PreviewRecorder] openSaveFolder failed:", e);
                         this.lastResult = { error: `フォルダを開けませんでした: ${e.message}` };
