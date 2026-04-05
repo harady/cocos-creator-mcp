@@ -99,7 +99,12 @@ export class ServerTools implements ToolCategory {
                             return files;
                         };
                         for (const file of collectJs(extDir).sort()) {
-                            const content = fs.readFileSync(path.join(extDir, file), "utf8");
+                            let content = fs.readFileSync(path.join(extDir, file), "utf8");
+                            // mcp-server.js の baked hash を postbuild 前と同じプレースホルダに逆置換
+                            // (postbuild は __BUILD_HASH__ が残った状態でハッシュ計算しているため、同じ入力にする)
+                            if (file === "mcp-server.js") {
+                                content = content.replace(/exports\.BUILD_HASH = "[a-f0-9]{12}"/, 'exports.BUILD_HASH = "__BUILD_HASH__"');
+                            }
                             hash.update(content.replace(/__BUILD_HASH__/g, ""));
                         }
                         const diskHash = hash.digest("hex").substring(0, 12);
