@@ -164,7 +164,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     coefficient: saved.coefficient ?? 0.25,
                     format: saved.format ?? "mp4",
                     savePath: saved.savePath ?? "temp/recordings",
-                    shotFormat: saved.shotFormat ?? "webp",
+                    shotFormat: saved.shotFormat ?? "png",
                     shotMaxWidth: saved.shotMaxWidth ?? 0,
                     lastResult: null as any,
                     lastError: false,
