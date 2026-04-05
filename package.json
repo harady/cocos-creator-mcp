@@ -8,7 +8,7 @@
         "build": "tsc && node scripts/postbuild.js",
         "watch": "tsc -w"
     },
-    "description": "MCP Server for Cocos Creator [db84670b5a7b]",
+    "description": "MCP Server for Cocos Creator [7fe09fe10a9f]",
     "main": "./dist/main.js",
     "dependencies": {
         "vue": "^3.1.4",
@@ -30,6 +30,17 @@
                 "width": 450,
                 "height": 350
             }
+        },
+        "recorder": {
+            "title": "i18n:cocos-creator-mcp.recorder_title",
+            "type": "dockable",
+            "main": "dist/panels/recorder",
+            "size": {
+                "min-width": 400,
+                "min-height": 400,
+                "width": 500,
+                "height": 600
+            }
         }
     },
     "contributions": {
@@ -38,12 +49,22 @@
                 "path": "i18n:menu.extension/Cocos Creator MCP",
                 "label": "i18n:cocos-creator-mcp.open_panel",
                 "message": "open-panel"
+            },
+            {
+                "path": "i18n:menu.extension/Cocos Creator MCP",
+                "label": "i18n:cocos-creator-mcp.open_recorder",
+                "message": "open-recorder"
             }
         ],
         "messages": {
             "open-panel": {
                 "methods": [
                     "openPanel"
+                ]
+            },
+            "open-recorder": {
+                "methods": [
+                    "openRecorder"
                 ]
             },
             "start-server": {
