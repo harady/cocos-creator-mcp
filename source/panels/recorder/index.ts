@@ -241,7 +241,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     this.elapsed = "0.0";
                     this.recordingInfo = "";
                 },
-                async openSaveFolder(this: any) {
+                openSaveFolder(this: any) {
                     const path = require("path");
                     const fs = require("fs");
                     const projectPath = Editor.Project.path;
@@ -250,21 +250,6 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                     const normalized = dir.replace(/\//g, "\\");
                     console.log("[PreviewRecorder] openSaveFolder:", normalized);
-                    // 1. Electron shell.openPath (推奨)
-                    try {
-                        const { shell } = require("electron");
-                        if (shell?.openPath) {
-                            const errMsg = await shell.openPath(normalized);
-                            if (errMsg) {
-                                console.warn("[PreviewRecorder] shell.openPath error:", errMsg);
-                            } else {
-                                return;
-                            }
-                        }
-                    } catch (e: any) {
-                        console.warn("[PreviewRecorder] shell unavailable:", e.message);
-                    }
-                    // 2. child_process fallback
                     try {
                         const { exec } = require("child_process");
                         const platform = process.platform;
@@ -274,8 +259,9 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                             ? `open "${dir}"`
                             : `xdg-open "${dir}"`;
                         console.log("[PreviewRecorder] exec:", cmd);
-                        exec(cmd, (err: any) => {
-                            if (err) console.warn("[PreviewRecorder] exec error:", err.message);
+                        exec(cmd, (err: any, stdout: any, stderr: any) => {
+                            // explorer.exe は開けても終了コードが1になることがある
+                            console.log("[PreviewRecorder] exec done. err:", err?.message, "stderr:", stderr);
                         });
                     } catch (e: any) {
                         console.error("[PreviewRecorder] openSaveFolder failed:", e);
