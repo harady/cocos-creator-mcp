@@ -172,10 +172,10 @@ let _recordStream: MediaStream | null = null;
 let _recordId: string | null = null;
 
 const QUALITY_PRESETS: Record<string, number> = {
-    low: 0.05,
-    medium: 0.10,
-    high: 0.15,
-    ultra: 0.25,
+    low: 0.08,
+    medium: 0.15,
+    high: 0.25,
+    ultra: 0.40,
 };
 
 function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; quality?: string; format?: "webm" | "mp4" }): { success: boolean; error?: string; data?: any } {

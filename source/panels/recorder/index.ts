@@ -121,6 +121,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     lastError: false,
                     _startTime: 0,
                     _timer: null as any,
+                    _aliveCheckTimer: null as any,
                 };
             },
             methods: {
@@ -157,6 +158,10 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                             this._timer = setInterval(() => {
                                 this.elapsed = ((Date.now() - this._startTime) / 1000).toFixed(1);
                             }, 100);
+                            // プレビュー停止検知用ポーリング（2秒毎）
+                            this._aliveCheckTimer = setInterval(() => {
+                                this.checkPreviewAlive();
+                            }, 2000);
                         } else {
                             // 可能な限り詳細なエラー情報を表示
                             const errDetail = parsed?.data?.error
@@ -209,6 +214,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         this.recording = false;
                         this.stopping = false;
                         if (this._timer) { clearInterval(this._timer); this._timer = null; }
+                        if (this._aliveCheckTimer) { clearInterval(this._aliveCheckTimer); this._aliveCheckTimer = null; }
                     }
                 },
                 resetQuality(this: any) {
@@ -218,6 +224,39 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 },
                 resetSavePath(this: any) {
                     this.savePath = "temp/recordings";
+                },
+                async checkPreviewAlive(this: any) {
+                    if (!this.recording) return;
+                    try {
+                        // MCP経由で軽量なinspectコマンドを送る
+                        const res = await fetch(`${MCP_BASE}/mcp`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                jsonrpc: "2.0", id: 99, method: "tools/call",
+                                params: {
+                                    name: "debug_game_command",
+                                    arguments: { type: "inspect", args: { name: "Canvas" }, timeout: 1500 },
+                                },
+                            }),
+                        });
+                        const json = await res.json();
+                        const content = json.result?.content?.[0]?.text;
+                        const parsed = content ? JSON.parse(content) : null;
+                        if (parsed?.success) {
+                            // プレビュー生存
+                            return;
+                        }
+                        // 応答なし → プレビュー停止とみなして録画停止状態に
+                        console.warn("[PreviewRecorder] preview not responding, stopping recording state");
+                        this.recording = false;
+                        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+                        if (this._aliveCheckTimer) { clearInterval(this._aliveCheckTimer); this._aliveCheckTimer = null; }
+                        this.lastResult = { error: "プレビューが停止したため録画を中断しました（動画は保存されません）" };
+                        this.lastError = true;
+                    } catch (e) {
+                        // ネットワークエラーは通信エラーとして無視（一時的かもしれない）
+                    }
                 },
                 async selectSaveFolder(this: any) {
                     try {
