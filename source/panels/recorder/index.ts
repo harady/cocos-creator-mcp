@@ -307,8 +307,15 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     if (!path.isAbsolute(dir)) dir = path.join(projectPath, dir);
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                     try {
-                        const { shell } = require("electron");
-                        shell.openPath(dir);
+                        const { spawn } = require("child_process");
+                        const platform = process.platform;
+                        const [cmd, ...args] = platform === "win32"
+                            ? ["explorer.exe", dir.replace(/\//g, "\\")]
+                            : platform === "darwin"
+                            ? ["open", dir]
+                            : ["xdg-open", dir];
+                        const p = spawn(cmd, args, { detached: true, stdio: "ignore" });
+                        p.unref();
                     } catch (e: any) {
                         console.error("[PreviewRecorder] openSaveFolder failed:", e);
                         this.lastResult = { error: `フォルダを開けませんでした: ${e.message}` };
