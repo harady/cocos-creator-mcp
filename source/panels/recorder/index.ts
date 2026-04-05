@@ -51,10 +51,6 @@ module.exports = Editor.Panel.define({
             <option value="webp">WebP</option>
             <option value="png">PNG</option>
         </select>
-        <label>最大幅:</label>
-        <input type="number" v-model.number="shotMaxWidth" :disabled="shooting" min="0" max="4096" step="100"
-               title="キャンバスをこの幅にリサイズ。0 で原寸のまま保存" />
-        <span class="unit">px (0=原寸)</span>
     </div>
 
     <div class="section-title">保存先</div>
@@ -142,7 +138,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
         if (!this.$.app) return;
         const MCP_BASE = "http://127.0.0.1:3000";
         const STORAGE_KEY = "cocos-mcp-recorder-settings";
-        const PERSISTED_KEYS = ["fps", "quality", "coefficient", "format", "savePath", "shotFormat", "shotMaxWidth"];
+        const PERSISTED_KEYS = ["fps", "quality", "coefficient", "format", "savePath", "shotFormat"];
         // localStorage から設定を読み込み
         const loadSettings = () => {
             try {
@@ -165,7 +161,6 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     format: saved.format ?? "mp4",
                     savePath: saved.savePath ?? "temp/recordings",
                     shotFormat: saved.shotFormat ?? "png",
-                    shotMaxWidth: saved.shotMaxWidth ?? 0,
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -180,7 +175,6 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 format(this: any) { this.saveSettings(); },
                 savePath(this: any) { this.saveSettings(); },
                 shotFormat(this: any) { this.saveSettings(); },
-                shotMaxWidth(this: any) { this.saveSettings(); },
             },
             methods: {
                 saveSettings(this: any) {
@@ -309,7 +303,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                 method: "tools/call",
                                 params: {
                                     name: "debug_game_command",
-                                    arguments: { type: "screenshot", args: {}, timeout: 5000, maxWidth: this.shotMaxWidth, imageFormat: this.shotFormat },
+                                    arguments: { type: "screenshot", args: {}, timeout: 5000, maxWidth: 0, imageFormat: this.shotFormat },
                                 },
                             }),
                         });
