@@ -37,9 +37,11 @@ module.exports = Editor.Panel.define({
             <option value="ultra">最高</option>
             <option value="custom">カスタム</option>
         </select>
-        <label>係数:</label>
+        <label title="ビットレート = 幅 × 高さ × FPS × 品質係数">品質係数:</label>
         <input type="number" v-model.number="coefficient" @input="onCoefChange"
-               :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate" />
+               :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate"
+               title="ビットレート = 幅 × 高さ × FPS × 品質係数" />
+        <span class="unit" title="720x1280 canvas 換算の目安">≈ {{ estimatedMbps }} Mbps</span>
         <button @click="resetQuality" class="btn btn-small" :disabled="recording" title="録画設定を初期値に戻す">↺</button>
     </div>
 
@@ -51,7 +53,8 @@ module.exports = Editor.Panel.define({
             <option value="png">PNG</option>
         </select>
         <label>最大幅:</label>
-        <input type="number" v-model.number="shotMaxWidth" :disabled="shooting" min="0" max="4096" step="100" title="0 = 原寸" />
+        <input type="number" v-model.number="shotMaxWidth" :disabled="shooting" min="0" max="4096" step="100"
+               title="キャンバスをこの幅にリサイズ。0 で原寸のまま保存" />
         <span class="unit">px (0=原寸)</span>
     </div>
 
@@ -139,6 +142,16 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
     ready() {
         if (!this.$.app) return;
         const MCP_BASE = "http://127.0.0.1:3000";
+        const STORAGE_KEY = "cocos-mcp-recorder-settings";
+        const PERSISTED_KEYS = ["fps", "quality", "coefficient", "format", "savePath", "shotFormat", "shotMaxWidth"];
+        // localStorage から設定を読み込み
+        const loadSettings = () => {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch { return {}; }
+        };
+        const saved = loadSettings();
         const app = createAppRec({
             data() {
                 return {
@@ -147,13 +160,13 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     shooting: false,
                     elapsed: "0.0",
                     recordingInfo: "",
-                    fps: 30,
-                    quality: "medium",
-                    coefficient: 0.25,
-                    format: "mp4",
-                    savePath: "temp/recordings",
-                    shotFormat: "webp",
-                    shotMaxWidth: 0,
+                    fps: saved.fps ?? 30,
+                    quality: saved.quality ?? "medium",
+                    coefficient: saved.coefficient ?? 0.25,
+                    format: saved.format ?? "mp4",
+                    savePath: saved.savePath ?? "temp/recordings",
+                    shotFormat: saved.shotFormat ?? "webp",
+                    shotMaxWidth: saved.shotMaxWidth ?? 0,
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -161,7 +174,28 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     _aliveCheckTimer: null as any,
                 };
             },
+            computed: {
+                /** 720x1280 canvas 換算のビットレート目安 (Mbps) */
+                estimatedMbps(this: any): string {
+                    const bps = 720 * 1280 * this.fps * this.coefficient;
+                    return (bps / 1_000_000).toFixed(1);
+                },
+            },
+            watch: {
+                fps(this: any) { this.saveSettings(); },
+                quality(this: any) { this.saveSettings(); },
+                coefficient(this: any) { this.saveSettings(); },
+                format(this: any) { this.saveSettings(); },
+                savePath(this: any) { this.saveSettings(); },
+                shotFormat(this: any) { this.saveSettings(); },
+                shotMaxWidth(this: any) { this.saveSettings(); },
+            },
             methods: {
+                saveSettings(this: any) {
+                    const data: any = {};
+                    for (const key of PERSISTED_KEYS) data[key] = this[key];
+                    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+                },
                 async start(this: any) {
                     this.lastResult = null;
                     try {
