@@ -306,17 +306,9 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     let dir = this.savePath || "temp/recordings";
                     if (!path.isAbsolute(dir)) dir = path.join(projectPath, dir);
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                    // spawn+detachedで高速に起動（execの新規shellコストを回避）
                     try {
-                        const { spawn } = require("child_process");
-                        const platform = process.platform;
-                        const [cmd, ...args] = platform === "win32"
-                            ? ["explorer.exe", dir.replace(/\//g, "\\")]
-                            : platform === "darwin"
-                            ? ["open", dir]
-                            : ["xdg-open", dir];
-                        const p = spawn(cmd, args, { detached: true, stdio: "ignore" });
-                        p.unref();
+                        const { shell } = require("electron");
+                        shell.openPath(dir);
                     } catch (e: any) {
                         console.error("[PreviewRecorder] openSaveFolder failed:", e);
                         this.lastResult = { error: `フォルダを開けませんでした: ${e.message}` };
