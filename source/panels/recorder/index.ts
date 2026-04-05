@@ -41,7 +41,7 @@ module.exports = Editor.Panel.define({
         <input type="number" v-model.number="coefficient" @input="onCoefChange"
                :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate"
                title="ビットレート = 幅 × 高さ × FPS × 品質係数" />
-        <span class="unit" title="720x1280 canvas 換算の目安">≈ {{ estimatedMbps }} Mbps</span>
+        <span class="unit" :title="`${canvasWidth}x${canvasHeight} 換算の目安`">≈ {{ estimatedMbps }} Mbps @ {{ canvasWidth }}x{{ canvasHeight }}</span>
         <button @click="resetQuality" class="btn btn-small" :disabled="recording" title="録画設定を初期値に戻す">↺</button>
     </div>
 
@@ -152,6 +152,15 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
             } catch { return {}; }
         };
         const saved = loadSettings();
+        // プロジェクトの design resolution を取得 (失敗時は 720x1280 にフォールバック)
+        let canvasW = 720, canvasH = 1280;
+        try {
+            const dr = (Editor as any).Profile.getConfig("project", "general.designResolution");
+            if (dr && typeof dr.width === "number" && typeof dr.height === "number") {
+                canvasW = dr.width;
+                canvasH = dr.height;
+            }
+        } catch { /* ignore */ }
         const app = createAppRec({
             data() {
                 return {
@@ -160,6 +169,8 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     shooting: false,
                     elapsed: "0.0",
                     recordingInfo: "",
+                    canvasWidth: canvasW,
+                    canvasHeight: canvasH,
                     fps: saved.fps ?? 30,
                     quality: saved.quality ?? "medium",
                     coefficient: saved.coefficient ?? 0.25,
@@ -175,9 +186,9 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 };
             },
             computed: {
-                /** 720x1280 canvas 換算のビットレート目安 (Mbps) */
+                /** プロジェクトの design resolution を使ったビットレート目安 (Mbps) */
                 estimatedMbps(this: any): string {
-                    const bps = 720 * 1280 * this.fps * this.coefficient;
+                    const bps = this.canvasWidth * this.canvasHeight * this.fps * this.coefficient;
                     return (bps / 1_000_000).toFixed(1);
                 },
             },
