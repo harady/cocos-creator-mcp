@@ -10,6 +10,7 @@ module.exports = Editor.Panel.define({
     <div class="controls">
         <button v-if="!recording" @click="start" class="btn btn-start">● 録画開始</button>
         <button v-else @click="stop" class="btn btn-stop" :disabled="stopping">■ 録画停止{{ stopping ? '中...' : '' }}</button>
+        <button @click="screenshot" class="btn btn-shot" :disabled="shooting">📸 スクショ{{ shooting ? '中...' : '' }}</button>
     </div>
 
     <div v-if="recording" class="status-row">
@@ -17,6 +18,7 @@ module.exports = Editor.Panel.define({
         <span class="info">{{ recordingInfo }}</span>
     </div>
 
+    <div class="section-title">録画設定</div>
     <div class="row">
         <label>FPS:</label>
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
@@ -35,14 +37,24 @@ module.exports = Editor.Panel.define({
             <option value="ultra">最高</option>
             <option value="custom">カスタム</option>
         </select>
-        <label>係数:</label>
+        <label title="ビットレート = 幅 × 高さ × FPS × 品質係数">品質係数:</label>
         <input type="number" v-model.number="coefficient" @input="onCoefChange"
-               :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate" />
+               :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate"
+               title="ビットレート = 幅 × 高さ × FPS × 品質係数" />
         <button @click="resetQuality" class="btn btn-small" :disabled="recording" title="録画設定を初期値に戻す">↺</button>
     </div>
 
+    <div class="section-title">スクショ設定</div>
     <div class="row">
-        <label>保存先:</label>
+        <label>形式:</label>
+        <select v-model="shotFormat" :disabled="shooting">
+            <option value="png">PNG</option>
+            <option value="webp">WebP</option>
+        </select>
+    </div>
+
+    <div class="section-title">保存先</div>
+    <div class="row">
         <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
         <button @click="selectSaveFolder" class="btn btn-small" :disabled="recording">📁 選択</button>
         <button @click="resetSavePath" class="btn btn-small" :disabled="recording" title="保存先を初期値に戻す">↺</button>
@@ -53,9 +65,9 @@ module.exports = Editor.Panel.define({
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
         <div v-if="!lastError">
-            <strong>✓ 録画完了</strong><br>
+            <strong>✓ {{ lastResult.kind === 'shot' ? 'スクショ保存' : '録画完了' }}</strong><br>
             <code>{{ lastResult.path }}</code><br>
-            {{ (lastResult.size / 1024 / 1024).toFixed(2) }} MB
+            {{ (lastResult.size / 1024).toFixed(1) }} KB
         </div>
         <div v-else>
             <strong>✗ エラー:</strong> {{ lastResult.error || lastResult.message || 'unknown' }}
@@ -85,6 +97,17 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .btn-start:hover { background: #e55; }
 .btn-stop { background: #888; }
 .btn-stop:hover { background: #999; }
+.btn-shot { background: #468; margin-left: 8px; }
+.btn-shot:hover { background: #579; }
+.section-title {
+    margin-top: 14px;
+    margin-bottom: 4px;
+    padding: 4px 0 3px 0;
+    font-size: 11px;
+    font-weight: bold;
+    color: #8af;
+    border-bottom: 1px solid #333;
+}
 .btn-small {
     padding: 4px 10px;
     background: #4a8;
@@ -114,18 +137,30 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
     ready() {
         if (!this.$.app) return;
         const MCP_BASE = "http://127.0.0.1:3000";
+        const STORAGE_KEY = "cocos-mcp-recorder-settings";
+        const PERSISTED_KEYS = ["fps", "quality", "coefficient", "format", "savePath", "shotFormat"];
+        // localStorage から設定を読み込み
+        const loadSettings = () => {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch { return {}; }
+        };
+        const saved = loadSettings();
         const app = createAppRec({
             data() {
                 return {
                     recording: false,
                     stopping: false,
+                    shooting: false,
                     elapsed: "0.0",
                     recordingInfo: "",
-                    fps: 30,
-                    quality: "medium",
-                    coefficient: 0.25,
-                    format: "mp4",
-                    savePath: "temp/recordings",
+                    fps: saved.fps ?? 30,
+                    quality: saved.quality ?? "medium",
+                    coefficient: saved.coefficient ?? 0.25,
+                    format: saved.format ?? "mp4",
+                    savePath: saved.savePath ?? "temp/recordings",
+                    shotFormat: saved.shotFormat ?? "png",
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -133,7 +168,20 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     _aliveCheckTimer: null as any,
                 };
             },
+            watch: {
+                fps(this: any) { this.saveSettings(); },
+                quality(this: any) { this.saveSettings(); },
+                coefficient(this: any) { this.saveSettings(); },
+                format(this: any) { this.saveSettings(); },
+                savePath(this: any) { this.saveSettings(); },
+                shotFormat(this: any) { this.saveSettings(); },
+            },
             methods: {
+                saveSettings(this: any) {
+                    const data: any = {};
+                    for (const key of PERSISTED_KEYS) data[key] = this[key];
+                    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+                },
                 async start(this: any) {
                     this.lastResult = null;
                     try {
@@ -242,6 +290,51 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 },
                 resetSavePath(this: any) {
                     this.savePath = "temp/recordings";
+                },
+                async screenshot(this: any) {
+                    this.shooting = true;
+                    try {
+                        const res = await fetch(`${MCP_BASE}/mcp`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                jsonrpc: "2.0",
+                                id: 3,
+                                method: "tools/call",
+                                params: {
+                                    name: "debug_game_command",
+                                    arguments: { type: "screenshot", args: {}, timeout: 5000, maxWidth: 0, imageFormat: this.shotFormat },
+                                },
+                            }),
+                        });
+                        const json = await res.json();
+                        const content = json.result?.content?.[0]?.text;
+                        const parsed = content ? JSON.parse(content) : null;
+                        if (parsed?.success && parsed.path) {
+                            // savePath 配下にコピー
+                            const fs = require("fs");
+                            const path = require("path");
+                            const projectPath = Editor.Project.path;
+                            let destDir = this.savePath || "temp/recordings";
+                            if (!path.isAbsolute(destDir)) destDir = path.join(projectPath, destDir);
+                            if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+                            const ts = new Date().toISOString().replace(/[:.]/g, "-");
+                            const ext = path.extname(parsed.path) || ".png";
+                            const destPath = path.join(destDir, `screenshot_${ts}${ext}`);
+                            fs.copyFileSync(parsed.path, destPath);
+                            this.lastResult = { kind: "shot", path: destPath, size: parsed.size };
+                            this.lastError = false;
+                        } else {
+                            const errDetail = parsed?.error || parsed?.message || "スクショ失敗";
+                            this.lastResult = { error: errDetail };
+                            this.lastError = true;
+                        }
+                    } catch (e: any) {
+                        this.lastResult = { error: `通信エラー: ${e.message}` };
+                        this.lastError = true;
+                    } finally {
+                        this.shooting = false;
+                    }
                 },
                 async checkPreviewAlive(this: any) {
                     if (!this.recording) return;

@@ -11,14 +11,15 @@ AI assistants like Claude can control Cocos Creator editor through this extensio
 - **JSON-RPC 2.0** — Standard MCP protocol compliance
 - **Prefab Property Persistence** — Component properties are correctly preserved when saving prefabs
 - **Preview in Editor** — Start editor preview programmatically (no manual button click needed)
-- **Screenshot Capture** — Capture editor window and game preview screenshots
-- **Game Command Control** — Send commands to running game preview (screenshot, click, navigate, state)
+- **Screenshot Capture** — Capture editor window and game preview screenshots (WebP / PNG)
+- **Video Recording** — Record game preview canvas to video (MP4 / WebM) via Preview Recorder panel
+- **Game Command Control** — Send commands to running game preview (screenshot, click, navigate, state, inspect)
 - **Client Scripts** — Drop-in TypeScript files for game preview integration (`client/`)
 - **Auto Start** — Server starts automatically when the extension loads
 - **Tool Call Logging** — All tool invocations logged with timing for debugging
 - **UUID Validation** — Input validation helpers for better error messages
 - **i18n** — English, Japanese, Chinese
-- **Regression Tests** — 224 assertions covering all 145 tools
+- **Regression Tests** — 265 assertions covering all 156 tools
 
 ## Quick Start
 
@@ -249,7 +250,7 @@ curl http://127.0.0.1:3000/health
 </details>
 
 <details>
-<summary><strong>Debug (17)</strong> — Editor info, logs, preview, screenshots, game control</summary>
+<summary><strong>Debug (21)</strong> — Editor info, logs, preview, screenshots, recording, game control</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -261,7 +262,11 @@ curl http://127.0.0.1:3000/health
 | `debug_preview` | Start Preview in Editor (play button) |
 | `debug_clear_code_cache` | Clear code cache (Developer > Cache) |
 | `debug_screenshot` | Capture editor window screenshot |
-| `debug_game_command` | Send command to game preview (screenshot/click/navigate/state) |
+| `debug_game_command` | Send command to game preview (screenshot/click/navigate/state/inspect) |
+| `debug_batch_screenshot` | Navigate to multiple pages and screenshot each |
+| `debug_record_start` | Start recording game preview canvas (webm/mp4) |
+| `debug_record_stop` | Stop recording and save video file |
+| `debug_reload_extension` | Reload this MCP extension (after build) |
 | `debug_list_extensions` | List installed extensions |
 | `debug_get_extension_info` | Get extension details |
 | `debug_get_project_logs` | Read project log entries |
@@ -446,6 +451,12 @@ node test/regression.mjs 3001    # custom port
 - **v1.0** — Full tool coverage (145 tools, 13 categories, 224 test assertions)
 - **v1.1** — Console log capture (scene process auto-capture + game preview via `/log` endpoint)
 - **v1.2** — AI autonomous development: Preview in Editor, screenshot capture, game command control, code cache clear, scene save fix. Client scripts for game preview integration (`client/`)
+- **v1.3** — `scene:set-property` for Prefab保存対応, prefab_create overwrite guard, param alias (`component` → `componentType`)
+- **v1.5** — `prefab_create_and_replace`, batch `set_property`, `prefab_open`
+- **v1.6** — `debug_batch_screenshot`, widget support in `create_tree`, `component_query_enum`, `server_check_code_sync`
+- **v1.8.0** — Preview Recorder panel: `debug_record_start` / `debug_record_stop` (MediaRecorder via canvas.captureStream, MP4/WebM, quality presets)
+- **v1.8.1** — Fix: `component_set_property` で cc.Asset 参照 (cc.Font 等) が type 未指定時に cc.Node にフォールバックされ破棄される問題を修正
+- **v1.8.2** — Preview Recorder: スクショボタン追加 (webp/png 切替, 最大幅指定), セクション分け UI
 
 ## Development
 

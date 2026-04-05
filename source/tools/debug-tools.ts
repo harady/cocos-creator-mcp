@@ -113,6 +113,7 @@ export class DebugTools implements ToolCategory {
                         args: { description: "Command arguments (e.g. {page: 'HomePageView'} for navigate, {name: 'ButtonName'} for click)" },
                         timeout: { type: "number", description: "Max wait time in ms (default 5000)" },
                         maxWidth: { type: "number", description: "Max width for screenshot resize (default: 960, 0 = no resize)" },
+                        imageFormat: { type: "string", description: "Screenshot output format: 'webp' (default, Q=85) or 'png' (lossless)" },
                     },
                     required: ["type"],
                 },
@@ -244,7 +245,7 @@ export class DebugTools implements ToolCategory {
                     await (Editor.Message.request as any)("program", "open-url", args.url);
                     return ok({ success: true, url: args.url });
                 case "debug_game_command":
-                    return this.gameCommand(args.type || args.command, args.args, args.timeout || 5000, args.maxWidth);
+                    return this.gameCommand(args.type || args.command, args.args, args.timeout || 5000, args.maxWidth, args.imageFormat);
                 case "debug_screenshot":
                     return this.takeScreenshot(args.savePath, args.maxWidth);
                 case "debug_preview":
@@ -581,7 +582,7 @@ export class DebugTools implements ToolCategory {
         }
     }
 
-    private async gameCommand(type: string, args: any, timeout: number, maxWidth?: number): Promise<ToolResult> {
+    private async gameCommand(type: string, args: any, timeout: number, maxWidth?: number, imageFormat?: string): Promise<ToolResult> {
         const cmdId = queueGameCommand(type, args);
 
         // Poll for result
@@ -603,7 +604,7 @@ export class DebugTools implements ToolCategory {
                         const electron = require("electron");
                         const origImage = electron.nativeImage.createFromBuffer(pngBuffer);
                         const originalSize = origImage.getSize();
-                        const { buffer, width, height, format } = await this.processImage(pngBuffer, effectiveMaxWidth);
+                        const { buffer, width, height, format } = await this.processImage(pngBuffer, effectiveMaxWidth, imageFormat);
                         const ext = format === "webp" ? "webp" : format === "jpeg" ? "jpg" : "png";
                         const filePath = path.join(dir, `game_${timestamp}.${ext}`);
                         fs.writeFileSync(filePath, buffer);
@@ -623,7 +624,7 @@ export class DebugTools implements ToolCategory {
         return err(`Game did not respond within ${timeout}ms. Is GameDebugClient running in the preview?`);
     }
 
-    private async processImage(pngBuffer: Buffer, maxWidth: number): Promise<{ buffer: Buffer; width: number; height: number; format: string }> {
+    private async processImage(pngBuffer: Buffer, maxWidth: number, desiredFormat?: string): Promise<{ buffer: Buffer; width: number; height: number; format: string }> {
         try {
             const Vips = require("wasm-vips");
             const vips = await Vips();
@@ -632,6 +633,13 @@ export class DebugTools implements ToolCategory {
             const origH = image.height;
             if (maxWidth > 0 && origW > maxWidth) {
                 image = image.thumbnailImage(maxWidth);
+            }
+            // png 明示指定時は pngsave (lossless)、それ以外は webp(Q=85)
+            if (desiredFormat === "png") {
+                const pngOut = image.pngsaveBuffer();
+                const result = { buffer: Buffer.from(pngOut), width: image.width, height: image.height, format: "png" };
+                image.delete();
+                return result;
             }
             const outBuf = image.webpsaveBuffer({ Q: 85 });
             const result = { buffer: Buffer.from(outBuf), width: image.width, height: image.height, format: "webp" };
