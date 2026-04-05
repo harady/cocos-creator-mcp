@@ -22,8 +22,8 @@ module.exports = Editor.Panel.define({
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
         <label>品質:</label>
         <select v-model="quality" :disabled="recording">
-            <option value="low">低 (軽量)</option>
-            <option value="medium">中 (標準)</option>
+            <option value="low">低</option>
+            <option value="medium">中</option>
             <option value="high">高</option>
             <option value="ultra">最高</option>
         </select>
