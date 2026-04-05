@@ -38,7 +38,10 @@ module.exports = Editor.Panel.define({
     <div class="row">
         <label>保存先:</label>
         <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
-        <button @click="openSaveFolder" class="btn btn-small">📂 フォルダを開く</button>
+        <button @click="selectSaveFolder" class="btn btn-small" :disabled="recording">📁 選択</button>
+    </div>
+    <div class="row">
+        <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
     </div>
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
@@ -207,6 +210,29 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         this.recording = false;
                         this.stopping = false;
                         if (this._timer) { clearInterval(this._timer); this._timer = null; }
+                    }
+                },
+                async selectSaveFolder(this: any) {
+                    try {
+                        const result = await (Editor.Dialog as any).select({
+                            title: "保存先フォルダを選択",
+                            type: "directory",
+                            multi: false,
+                        });
+                        if (result?.filePaths?.length) {
+                            const path = require("path");
+                            const projectPath = Editor.Project.path;
+                            const absPath = result.filePaths[0];
+                            // プロジェクト配下なら相対パスで保持
+                            const relPath = path.relative(projectPath, absPath);
+                            if (!relPath.startsWith("..") && !path.isAbsolute(relPath)) {
+                                this.savePath = relPath.replace(/\\/g, "/");
+                            } else {
+                                this.savePath = absPath;
+                            }
+                        }
+                    } catch (e: any) {
+                        console.error("[PreviewRecorder] selectSaveFolder failed:", e);
                     }
                 },
                 reset(this: any) {
