@@ -677,6 +677,39 @@ async function testV18NewTools() {
     assert(!!stopTool, "debug_record_stop registered");
 }
 
+// テスト失敗等で残った (Missing Node) 等のゴミを一括削除
+async function cleanupOrphanNodes() {
+    console.log("\n── cleanup: removing orphan nodes ──");
+    const hier = await callTool("scene_get_hierarchy");
+    if (!hier.success || !Array.isArray(hier.hierarchy)) {
+        skip("cleanup: hierarchy not available");
+        return;
+    }
+    const targets = [];
+    const walk = (nodes) => {
+        if (!Array.isArray(nodes)) return;
+        for (const n of nodes) {
+            if (n.name === "(Missing Node)" || /^TestNode_\d+$/.test(n.name)) {
+                targets.push(n.uuid);
+            }
+            if (n.children) walk(n.children);
+        }
+    };
+    walk(hier.hierarchy);
+    if (targets.length === 0) {
+        console.log("  ✅ no orphan nodes found");
+        passed++;
+        return;
+    }
+    let deleted = 0;
+    for (const uuid of targets) {
+        const r = await callTool("node_delete", { uuid });
+        if (r.success) deleted++;
+    }
+    console.log(`  ✅ cleaned up ${deleted}/${targets.length} orphan nodes`);
+    passed++;
+}
+
 // ── runner ──
 
 async function main() {
@@ -715,6 +748,7 @@ async function main() {
     await testNewEditorAPIs();
     await testV16NewTools();
     await testV18NewTools();
+    await cleanupOrphanNodes();
 
     console.log(`\n${"═".repeat(40)}`);
     console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);
