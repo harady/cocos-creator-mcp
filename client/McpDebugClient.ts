@@ -70,6 +70,10 @@ async function executeCommand(cmd: McpCommand): Promise<any> {
                 return { id: cmd.id, ...takeScreenshot() };
             case "click":
                 return { id: cmd.id, ...clickNode(cmd.args?.name) };
+            case "record_start":
+                return { id: cmd.id, ...startRecording(cmd.args) };
+            case "record_stop":
+                return { id: cmd.id, ...(await stopRecording()) };
         }
         // カスタムコマンド
         const handler = _config.customCommands[cmd.type];
@@ -158,6 +162,100 @@ function clickNode(name?: string): { success: boolean; error?: string } {
 
     found.emit(Button.EventType.CLICK, found);
     return { success: true };
+}
+
+// ─── 録画（MediaRecorder経由） ───
+
+let _mediaRecorder: MediaRecorder | null = null;
+let _recordChunks: Blob[] = [];
+let _recordStream: MediaStream | null = null;
+let _recordId: string | null = null;
+
+function startRecording(args?: { fps?: number; videoBitsPerSecond?: number }): { success: boolean; error?: string; data?: any } {
+    if (_mediaRecorder) return { success: false, error: "already recording" };
+    try {
+        // GameView canvas取得
+        const canvas = document.getElementById("GameCanvas") as HTMLCanvasElement
+            || document.querySelector("canvas") as HTMLCanvasElement;
+        if (!canvas) return { success: false, error: "canvas not found" };
+
+        const fps = args?.fps ?? 30;
+        const bps = args?.videoBitsPerSecond ?? 4_000_000;
+        _recordStream = canvas.captureStream(fps);
+        _recordChunks = [];
+        _recordId = `rec_${Date.now()}`;
+
+        // VP9→VP8→webmの順でフォールバック
+        const candidates = [
+            "video/webm;codecs=vp9",
+            "video/webm;codecs=vp8",
+            "video/webm",
+        ];
+        let mimeType = "";
+        for (const c of candidates) {
+            if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(c)) {
+                mimeType = c;
+                break;
+            }
+        }
+        if (!mimeType) return { success: false, error: "No supported MediaRecorder mimeType" };
+
+        _mediaRecorder = new MediaRecorder(_recordStream, { mimeType, videoBitsPerSecond: bps });
+        _mediaRecorder.ondataavailable = (e: BlobEvent) => {
+            if (e.data.size > 0) _recordChunks.push(e.data);
+        };
+        _mediaRecorder.start();
+        return { success: true, data: { id: _recordId, mimeType, fps, canvasWidth: canvas.width, canvasHeight: canvas.height } };
+    } catch (e: any) {
+        _mediaRecorder = null;
+        _recordStream = null;
+        return { success: false, error: e.message || String(e) };
+    }
+}
+
+async function stopRecording(): Promise<{ success: boolean; error?: string; data?: any }> {
+    if (!_mediaRecorder || !_recordId) return { success: false, error: "not recording" };
+    const id = _recordId;
+    const mimeType = _mediaRecorder.mimeType;
+    return new Promise((resolve) => {
+        _mediaRecorder!.onstop = async () => {
+            try {
+                const blob = new Blob(_recordChunks, { type: mimeType });
+                _recordStream?.getTracks().forEach(t => t.stop());
+                _mediaRecorder = null;
+                _recordStream = null;
+                _recordChunks = [];
+                _recordId = null;
+
+                // Blob → base64 → POST /game/recording
+                const base64 = await blobToBase64(blob);
+                const uploadRes = await fetch(`${_config.mcpBaseUrl}/game/recording`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id, base64, mimeType }),
+                });
+                const uploadData = await uploadRes.json();
+                resolve({ success: true, data: { id, size: blob.size, ...uploadData } });
+            } catch (e: any) {
+                resolve({ success: false, error: e.message || String(e) });
+            }
+        };
+        _mediaRecorder!.stop();
+    });
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result as string;
+            // "data:video/webm;base64,XXX" → XXX だけ抽出
+            const commaIdx = result.indexOf(",");
+            resolve(commaIdx >= 0 ? result.substring(commaIdx + 1) : result);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
 }
 
 function findNodeByName(root: Node, name: string): Node | null {

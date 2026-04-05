@@ -71,6 +71,25 @@ export function clearCommandState(): void {
     _commandResult = null;
 }
 
+// ─── Recording Storage ───
+
+interface RecordingInfo {
+    path: string;
+    size: number;
+    createdAt: string;
+}
+
+const _recordings = new Map<string, RecordingInfo>();
+
+/** Get completed recording info by id */
+export function getRecording(id: string): RecordingInfo | undefined {
+    return _recordings.get(id);
+}
+
+export function setRecording(id: string, info: RecordingInfo): void {
+    _recordings.set(id, info);
+}
+
 export class McpServer {
     private server: http.Server | null = null;
     private tools: Map<string, ToolCategory> = new Map();
@@ -179,6 +198,41 @@ export class McpServer {
             } catch { /* ignore */ }
             res.writeHead(204);
             res.end();
+            return;
+        }
+
+        // Game preview recording receiver
+        if (url === "/game/recording" && req.method === "POST") {
+            const body = await readBody(req);
+            try {
+                const { id, base64, mimeType } = JSON.parse(body);
+                if (!id || !base64) throw new Error("id/base64 required");
+
+                const fs = require("fs");
+                const path = require("path");
+                const buffer = Buffer.from(base64, "base64");
+
+                // Save to project temp/recordings/
+                const projectPath = (global as any).Editor?.Project?.path
+                    || process.cwd();
+                const dir = path.join(projectPath, "temp", "recordings");
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                const ext = (mimeType || "").includes("webm") ? "webm" : "bin";
+                const fileName = `${id}.${ext}`;
+                const filePath = path.join(dir, fileName);
+                fs.writeFileSync(filePath, buffer);
+
+                setRecording(id, {
+                    path: filePath,
+                    size: buffer.length,
+                    createdAt: new Date().toISOString(),
+                });
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: true, path: filePath, size: buffer.length }));
+            } catch (e: any) {
+                res.writeHead(400, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: false, error: e.message }));
+            }
             return;
         }
 
