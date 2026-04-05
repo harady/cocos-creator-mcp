@@ -18,6 +18,17 @@ module.exports = Editor.Panel.define({
         <span class="info">{{ recordingInfo }}</span>
     </div>
 
+    <div class="section-title">保存先</div>
+    <div class="row">
+        <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
+        <button @click="selectSaveFolder" class="btn btn-small" :disabled="recording">📁 選択</button>
+        <button @click="resetSavePath" class="btn btn-small" :disabled="recording" title="保存先を初期値に戻す">↺</button>
+    </div>
+    <div class="row">
+        <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
+    </div>
+
+    <div class="section-title">録画設定</div>
     <div class="row">
         <label>FPS:</label>
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
@@ -40,16 +51,6 @@ module.exports = Editor.Panel.define({
         <input type="number" v-model.number="coefficient" @input="onCoefChange"
                :disabled="recording" min="0.01" max="2" step="0.01" class="custom-bitrate" />
         <button @click="resetQuality" class="btn btn-small" :disabled="recording" title="録画設定を初期値に戻す">↺</button>
-    </div>
-
-    <div class="row">
-        <label>保存先:</label>
-        <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
-        <button @click="selectSaveFolder" class="btn btn-small" :disabled="recording">📁 選択</button>
-        <button @click="resetSavePath" class="btn btn-small" :disabled="recording" title="保存先を初期値に戻す">↺</button>
-    </div>
-    <div class="row">
-        <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
     </div>
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
@@ -88,6 +89,15 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .btn-stop:hover { background: #999; }
 .btn-shot { background: #468; margin-left: 8px; }
 .btn-shot:hover { background: #579; }
+.section-title {
+    margin-top: 14px;
+    margin-bottom: 4px;
+    padding: 4px 0 3px 0;
+    font-size: 11px;
+    font-weight: bold;
+    color: #8af;
+    border-bottom: 1px solid #333;
+}
 .btn-small {
     padding: 4px 10px;
     background: #4a8;
