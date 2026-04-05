@@ -110,7 +110,7 @@ export class DebugTools implements ToolCategory {
                     type: "object",
                     properties: {
                         type: { type: "string", description: "Command type: 'screenshot', 'state', 'navigate', 'click', 'inspect'" },
-                        args: { description: "Command arguments (e.g. {page: 'HomePageView'} for navigate, {name: 'ButtonName'} for click)" },
+                        args: { type: "object", description: "Command arguments (e.g. {page: 'HomePageView'} for navigate, {name: 'ButtonName'} for click)" },
                         timeout: { type: "number", description: "Max wait time in ms (default 5000)" },
                         maxWidth: { type: "number", description: "Max width for screenshot resize (default: 960, 0 = no resize)" },
                         imageFormat: { type: "string", description: "Screenshot output format: 'webp' (default, Q=85) or 'png' (lossless)" },
@@ -244,8 +244,14 @@ export class DebugTools implements ToolCategory {
                 case "debug_open_url":
                     await (Editor.Message.request as any)("program", "open-url", args.url);
                     return ok({ success: true, url: args.url });
-                case "debug_game_command":
-                    return this.gameCommand(args.type || args.command, args.args, args.timeout || 5000, args.maxWidth, args.imageFormat);
+                case "debug_game_command": {
+                    // args.args は MCP クライアントによってはJSON文字列で来るためパースして吸収
+                    let innerArgs = args.args;
+                    if (typeof innerArgs === "string") {
+                        try { innerArgs = JSON.parse(innerArgs); } catch { /* string のまま */ }
+                    }
+                    return this.gameCommand(args.type || args.command, innerArgs, args.timeout || 5000, args.maxWidth, args.imageFormat);
+                }
                 case "debug_screenshot":
                     return this.takeScreenshot(args.savePath, args.maxWidth);
                 case "debug_preview":
