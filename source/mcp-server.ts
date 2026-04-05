@@ -205,17 +205,22 @@ export class McpServer {
         if (url === "/game/recording" && req.method === "POST") {
             const body = await readBody(req);
             try {
-                const { id, base64, mimeType } = JSON.parse(body);
+                const { id, base64, mimeType, savePath } = JSON.parse(body);
                 if (!id || !base64) throw new Error("id/base64 required");
 
                 const fs = require("fs");
                 const path = require("path");
                 const buffer = Buffer.from(base64, "base64");
 
-                // Save to project temp/recordings/
+                // savePath指定があればそこに保存（絶対パスまたはプロジェクト相対パス）
                 const projectPath = (global as any).Editor?.Project?.path
                     || process.cwd();
-                const dir = path.join(projectPath, "temp", "recordings");
+                let dir: string;
+                if (savePath) {
+                    dir = path.isAbsolute(savePath) ? savePath : path.join(projectPath, savePath);
+                } else {
+                    dir = path.join(projectPath, "temp", "recordings");
+                }
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                 const mt = (mimeType || "").toLowerCase();
                 const ext = mt.includes("webm") ? "webm"

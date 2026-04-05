@@ -10,6 +10,7 @@ module.exports = Editor.Panel.define({
     <div class="controls">
         <button v-if="!recording" @click="start" class="btn btn-start">● 録画開始</button>
         <button v-else @click="stop" class="btn btn-stop" :disabled="stopping">■ 録画停止{{ stopping ? '中...' : '' }}</button>
+        <button @click="reset" class="btn btn-reset" title="録画状態と結果をクリア">🔄 リセット</button>
     </div>
 
     <div v-if="recording" class="status-row">
@@ -34,12 +35,17 @@ module.exports = Editor.Panel.define({
         </select>
     </div>
 
+    <div class="row">
+        <label>保存先:</label>
+        <input type="text" v-model="savePath" :disabled="recording" class="path-input" placeholder="temp/recordings" />
+        <button @click="openSaveFolder" class="btn btn-small">📂 フォルダを開く</button>
+    </div>
+
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
         <div v-if="!lastError">
             <strong>✓ 録画完了</strong><br>
             <code>{{ lastResult.path }}</code><br>
             {{ (lastResult.size / 1024 / 1024).toFixed(2) }} MB
-            <button @click="openFolder" class="btn btn-small">📂 フォルダを開く</button>
         </div>
         <div v-else>
             <strong>✗ エラー:</strong> {{ lastResult.error || lastResult.message || 'unknown' }}
@@ -69,6 +75,8 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .btn-start:hover { background: #e55; }
 .btn-stop { background: #888; }
 .btn-stop:hover { background: #999; }
+.btn-reset { background: #555; padding: 10px 12px; margin-left: 8px; font-size: 12px; }
+.btn-reset:hover { background: #666; }
 .btn-small {
     padding: 4px 10px;
     background: #4a8;
@@ -85,6 +93,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .row label { font-size: 12px; }
 .row input { width: 60px; padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
 .row select { padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
+.path-input { flex: 1; min-width: 200px; width: auto !important; font-family: monospace; }
 .result { margin: 12px 0; padding: 10px; border-radius: 4px; font-size: 12px; line-height: 1.5; }
 .result.success { background: #1a3a1a; color: #afa; }
 .result.error { background: #3a1a1a; color: #faa; }
@@ -105,6 +114,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     fps: 30,
                     quality: "medium",
                     format: "mp4",
+                    savePath: "temp/recordings",
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -128,6 +138,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                         fps: this.fps,
                                         quality: this.quality,
                                         format: this.format,
+                                        savePath: this.savePath,
                                     },
                                 },
                             }),
@@ -196,6 +207,40 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                         this.recording = false;
                         this.stopping = false;
                         if (this._timer) { clearInterval(this._timer); this._timer = null; }
+                    }
+                },
+                reset(this: any) {
+                    this.lastResult = null;
+                    this.lastError = false;
+                    this.elapsed = "0.0";
+                    this.recordingInfo = "";
+                },
+                openSaveFolder(this: any) {
+                    const path = require("path");
+                    const fs = require("fs");
+                    const projectPath = Editor.Project.path;
+                    let dir = this.savePath || "temp/recordings";
+                    if (!path.isAbsolute(dir)) dir = path.join(projectPath, dir);
+                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                    try {
+                        const { shell } = require("electron");
+                        if (shell?.openPath) {
+                            shell.openPath(dir);
+                            return;
+                        }
+                    } catch (e) { /* fallback */ }
+                    try {
+                        const { exec } = require("child_process");
+                        const platform = process.platform;
+                        if (platform === "win32") {
+                            exec(`explorer.exe "${dir.replace(/\//g, "\\")}"`);
+                        } else if (platform === "darwin") {
+                            exec(`open "${dir}"`);
+                        } else {
+                            exec(`xdg-open "${dir}"`);
+                        }
+                    } catch (e: any) {
+                        console.error("[PreviewRecorder] openSaveFolder failed:", e);
                     }
                 },
                 openFolder(this: any) {
