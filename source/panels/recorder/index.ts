@@ -48,8 +48,8 @@ module.exports = Editor.Panel.define({
     <div class="row">
         <label>形式:</label>
         <select v-model="shotFormat" :disabled="shooting">
-            <option value="webp">WebP</option>
             <option value="png">PNG</option>
+            <option value="webp">WebP</option>
         </select>
     </div>
 
