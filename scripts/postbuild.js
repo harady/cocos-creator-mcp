@@ -58,7 +58,7 @@ if (process.env.SYNC_TARGET) {
 
 if (syncTargets.length > 0) {
     const rootDir = path.join(__dirname, "..");
-    const filesToSync = ["dist", "client", "i18n", "static", "package.json", "package-lock.json"];
+    const filesToSync = ["dist", "client", "i18n", "static", "package.json", "package-lock.json", "node_modules"];
 
     for (const target of syncTargets) {
         const targetDir = path.resolve(target);

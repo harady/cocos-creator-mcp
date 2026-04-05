@@ -69,6 +69,10 @@ export const methods: Record<string, (...args: any[]) => any> = {
         Editor.Panel.open("cocos-creator-mcp");
     },
 
+    openRecorder() {
+        Editor.Panel.open("cocos-creator-mcp.recorder");
+    },
+
     async startServer() {
         if (server?.isRunning) return { running: true, port: server.port };
         const config = loadConfig();
