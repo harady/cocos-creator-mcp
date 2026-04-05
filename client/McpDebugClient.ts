@@ -171,7 +171,7 @@ let _recordChunks: Blob[] = [];
 let _recordStream: MediaStream | null = null;
 let _recordId: string | null = null;
 
-function startRecording(args?: { fps?: number; videoBitsPerSecond?: number }): { success: boolean; error?: string; data?: any } {
+function startRecording(args?: { fps?: number; videoBitsPerSecond?: number; format?: "webm" | "mp4" }): { success: boolean; error?: string; data?: any } {
     if (_mediaRecorder) return { success: false, error: "already recording" };
     try {
         // GameView canvas取得
@@ -181,16 +181,25 @@ function startRecording(args?: { fps?: number; videoBitsPerSecond?: number }): {
 
         const fps = args?.fps ?? 30;
         const bps = args?.videoBitsPerSecond ?? 4_000_000;
+        const format = args?.format ?? "webm";
         _recordStream = canvas.captureStream(fps);
         _recordChunks = [];
         _recordId = `rec_${new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").substring(0, 19)}`;
 
-        // VP9→VP8→webmの順でフォールバック
-        const candidates = [
+        // 指定フォーマット優先、非対応ならwebmにfallback
+        const mp4Candidates = [
+            "video/mp4;codecs=h264",
+            "video/mp4;codecs=avc1.42E01E",
+            "video/mp4",
+        ];
+        const webmCandidates = [
             "video/webm;codecs=vp9",
             "video/webm;codecs=vp8",
             "video/webm",
         ];
+        const candidates = format === "mp4"
+            ? [...mp4Candidates, ...webmCandidates]
+            : webmCandidates;
         let mimeType = "";
         for (const c of candidates) {
             if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(c)) {

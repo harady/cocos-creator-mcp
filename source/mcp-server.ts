@@ -217,7 +217,10 @@ export class McpServer {
                     || process.cwd();
                 const dir = path.join(projectPath, "temp", "recordings");
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                const ext = (mimeType || "").includes("webm") ? "webm" : "bin";
+                const mt = (mimeType || "").toLowerCase();
+                const ext = mt.includes("webm") ? "webm"
+                    : mt.includes("mp4") ? "mp4"
+                    : "bin";
                 const fileName = `${id}.${ext}`;
                 const filePath = path.join(dir, fileName);
                 fs.writeFileSync(filePath, buffer);

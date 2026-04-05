@@ -22,6 +22,11 @@ module.exports = Editor.Panel.define({
         <input type="number" v-model.number="fps" :disabled="recording" min="10" max="60" />
         <label>ビットレート(Mbps):</label>
         <input type="number" v-model.number="bitrateMbps" :disabled="recording" min="1" max="20" step="0.5" />
+        <label>形式:</label>
+        <select v-model="format" :disabled="recording">
+            <option value="webm">WebM</option>
+            <option value="mp4">MP4 (対応時のみ)</option>
+        </select>
     </div>
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
@@ -74,6 +79,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .row { margin: 10px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .row label { font-size: 12px; }
 .row input { width: 60px; padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
+.row select { padding: 4px 8px; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; }
 .result { margin: 12px 0; padding: 10px; border-radius: 4px; font-size: 12px; line-height: 1.5; }
 .result.success { background: #1a3a1a; color: #afa; }
 .result.error { background: #3a1a1a; color: #faa; }
@@ -93,6 +99,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     recordingInfo: "",
                     fps: 30,
                     bitrateMbps: 4,
+                    format: "webm",
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -115,6 +122,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                                     arguments: {
                                         fps: this.fps,
                                         videoBitsPerSecond: Math.round(this.bitrateMbps * 1_000_000),
+                                        format: this.format,
                                     },
                                 },
                             }),
