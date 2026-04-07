@@ -209,8 +209,34 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     for (const key of PERSISTED_KEYS) data[key] = this[key];
                     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
                 },
+                async isPreviewRunning(this: any): Promise<boolean> {
+                    try {
+                        const res = await fetch(`${MCP_BASE}/mcp`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                jsonrpc: "2.0", id: 98, method: "tools/call",
+                                params: {
+                                    name: "debug_game_command",
+                                    arguments: { type: "inspect", args: { name: "Canvas" }, timeout: 1500 },
+                                },
+                            }),
+                        });
+                        const json = await res.json();
+                        const content = json.result?.content?.[0]?.text;
+                        const parsed = content ? JSON.parse(content) : null;
+                        return !!parsed?.success;
+                    } catch {
+                        return false;
+                    }
+                },
                 async start(this: any) {
                     this.lastResult = null;
+                    if (!await this.isPreviewRunning()) {
+                        this.lastResult = { error: "ゲームプレビューが実行されていません。プレビューを開始してから録画してください。" };
+                        this.lastError = true;
+                        return;
+                    }
                     try {
                         const res = await fetch(`${MCP_BASE}/mcp`, {
                             method: "POST",
@@ -335,6 +361,12 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 },
                 async screenshot(this: any) {
                     this.shooting = true;
+                    if (!await this.isPreviewRunning()) {
+                        this.lastResult = { error: "ゲームプレビューが実行されていません。プレビューを開始してからスクショしてください。" };
+                        this.lastError = true;
+                        this.shooting = false;
+                        return;
+                    }
                     try {
                         const res = await fetch(`${MCP_BASE}/mcp`, {
                             method: "POST",
