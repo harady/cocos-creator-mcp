@@ -719,6 +719,26 @@ async function testStringifiedArgs() {
     await callTool("node_delete", { uuid: n3.uuid });
 }
 
+async function testSceneCreate() {
+    console.log("\n── scene_create (asset-db fallback) ──");
+    const testPath = `db://assets/test/SceneCreateTest_${Date.now()}.scene`;
+    const result = await callTool("scene_create", { path: testPath });
+    assert(result.success === true, `scene_create with path (method: ${result.method})`);
+
+    // クリーンアップ: テスト用シーンを削除し、元のシーンに戻る
+    if (result.success) {
+        // 元のシーンに戻す
+        const scenes = await callTool("scene_get_list");
+        const mainScene = scenes.scenes?.find((s) => s.name !== testPath.split("/").pop()?.replace(".scene", ""));
+        if (mainScene) {
+            await callTool("scene_open", { uuid: mainScene.uuid });
+            // 少し待つ
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        await callTool("asset_delete", { path: testPath });
+    }
+}
+
 async function testUncoveredTools() {
     console.log("\n── uncovered tools (minimum 1 call) ──");
     const hier = await callTool("scene_get_hierarchy");
@@ -883,6 +903,7 @@ async function main() {
     await testV16NewTools();
     await testV18NewTools();
     await testStringifiedArgs();
+    await testSceneCreate();
     await testUncoveredTools();
     await cleanupOrphanNodes();
 
