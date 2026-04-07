@@ -46,9 +46,11 @@ export interface JsonRpcResponse {
 export interface ServerConfig {
     port: number;
     autoStart: boolean;
+    autoArchiveRecordings: boolean;
 }
 
 export const DEFAULT_CONFIG: ServerConfig = {
     port: 3000,
     autoStart: false,
+    autoArchiveRecordings: false,
 };

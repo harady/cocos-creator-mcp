@@ -61,6 +61,7 @@ module.exports = Editor.Panel.define({
     </div>
     <div class="row">
         <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
+        <label class="checkbox-label"><input type="checkbox" v-model="autoArchive" @change="onAutoArchiveChange" /> 自動整理</label>
     </div>
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
@@ -131,6 +132,8 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .result.success { background: #1a3a1a; color: #afa; }
 .result.error { background: #3a1a1a; color: #faa; }
 .result code { font-size: 10px; word-break: break-all; background: #000; padding: 2px 4px; border-radius: 2px; }
+.checkbox-label { font-size: 12px; display: flex; align-items: center; gap: 4px; margin-left: auto; cursor: pointer; }
+.checkbox-label input[type="checkbox"] { cursor: pointer; }
 .note { margin-top: 16px; padding-top: 8px; border-top: 1px solid #333; font-size: 10px; color: #888; }
     `,
     $: { app: "#app" },
@@ -147,6 +150,17 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
             } catch { return {}; }
         };
         const saved = loadSettings();
+        // プロジェクト設定から autoArchiveRecordings を読み込み
+        const loadProjectConfig = () => {
+            try {
+                const fs = require("fs");
+                const path = require("path");
+                const p = path.join(Editor.Project.path, "settings", "cocos-creator-mcp.json");
+                if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf-8"));
+            } catch { /* ignore */ }
+            return {};
+        };
+        const projectCfg = loadProjectConfig();
         const app = createAppRec({
             data() {
                 return {
@@ -161,6 +175,7 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     format: saved.format ?? "mp4",
                     savePath: saved.savePath ?? "temp/recordings",
                     shotFormat: saved.shotFormat ?? "png",
+                    autoArchive: projectCfg.autoArchiveRecordings ?? false,
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -291,6 +306,21 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 resetSavePath(this: any) {
                     this.savePath = "temp/recordings";
                 },
+                onAutoArchiveChange(this: any) {
+                    try {
+                        const fs = require("fs");
+                        const path = require("path");
+                        const p = path.join(Editor.Project.path, "settings", "cocos-creator-mcp.json");
+                        let cfg: any = {};
+                        if (fs.existsSync(p)) cfg = JSON.parse(fs.readFileSync(p, "utf-8"));
+                        cfg.autoArchiveRecordings = this.autoArchive;
+                        const dir = path.dirname(p);
+                        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                        fs.writeFileSync(p, JSON.stringify(cfg, null, 2), "utf-8");
+                    } catch (e) {
+                        console.warn("[recorder] 設定保存失敗:", e);
+                    }
+                },
                 async screenshot(this: any) {
                     this.shooting = true;
                     try {
@@ -322,6 +352,17 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                             const ext = path.extname(parsed.path) || ".png";
                             const destPath = path.join(destDir, `screenshot_${ts}${ext}`);
                             fs.copyFileSync(parsed.path, destPath);
+                            // 設定に応じて古いファイルをアーカイブ
+                            try {
+                                const settingsPath = path.join(projectPath, "settings", "cocos-creator-mcp.json");
+                                if (fs.existsSync(settingsPath)) {
+                                    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+                                    if (cfg.autoArchiveRecordings) {
+                                        const { archiveOldFiles } = require("../../archive");
+                                        archiveOldFiles(destDir);
+                                    }
+                                }
+                            } catch { /* ignore */ }
                             this.lastResult = { kind: "shot", path: destPath, size: parsed.size };
                             this.lastError = false;
                         } else {
