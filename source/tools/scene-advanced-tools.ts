@@ -390,7 +390,7 @@ export class SceneAdvancedTools implements ToolCategory {
     }
 
     private async createScene(path?: string): Promise<ToolResult> {
-        // path 未指定 → editor の new-scene を試行
+        // まず scene:new-scene を試行（path 未指定時のみ）
         if (!path) {
             try {
                 await (Editor.Message.request as any)("scene", "new-scene");
@@ -398,17 +398,28 @@ export class SceneAdvancedTools implements ToolCategory {
             } catch (e: any) {
                 const msg = e?.message || String(e);
                 if (msg.includes("Message does not exist") || msg.includes("scene - new-scene")) {
-                    return err(
-                        "scene:new-scene is not available on this Cocos Creator version. " +
-                        "Please specify a 'path' parameter (e.g. 'db://assets/scenes/NewScene.scene') " +
-                        "to create a scene file via asset-db fallback.",
-                    );
+                    // CC 3.8.x → asset-db fallback にフォール
+                    const fallbackPath = await this.generateAvailableScenePath();
+                    return this.createSceneViaAssetDb(fallbackPath);
                 }
                 return err(msg);
             }
         }
 
         // path 指定 → asset-db fallback
+        return this.createSceneViaAssetDb(path);
+    }
+
+    private async generateAvailableScenePath(): Promise<string> {
+        const basePath = "db://assets/NewScene.scene";
+        try {
+            const result = await (Editor.Message.request as any)("asset-db", "generate-available-url", basePath);
+            if (result) return result;
+        } catch { /* fallback */ }
+        return `db://assets/NewScene_${Date.now()}.scene`;
+    }
+
+    private async createSceneViaAssetDb(path: string): Promise<ToolResult> {
         try {
             if (!path.endsWith(".scene")) path += ".scene";
 

@@ -721,21 +721,35 @@ async function testStringifiedArgs() {
 
 async function testSceneCreate() {
     console.log("\n── scene_create (asset-db fallback) ──");
+
+    // 元のシーンを記憶
+    const origScene = await callTool("scene_get_current");
+    const origUuid = origScene.uuid || origScene.data?.uuid;
+
+    // 1. path 指定での作成
     const testPath = `db://assets/test/SceneCreateTest_${Date.now()}.scene`;
     const result = await callTool("scene_create", { path: testPath });
     assert(result.success === true, `scene_create with path (method: ${result.method})`);
 
-    // クリーンアップ: テスト用シーンを削除し、元のシーンに戻る
-    if (result.success) {
-        // 元のシーンに戻す
-        const scenes = await callTool("scene_get_list");
-        const mainScene = scenes.scenes?.find((s) => s.name !== testPath.split("/").pop()?.replace(".scene", ""));
-        if (mainScene) {
-            await callTool("scene_open", { uuid: mainScene.uuid });
-            // 少し待つ
-            await new Promise(r => setTimeout(r, 1000));
-        }
+    // 元のシーンに戻してクリーンアップ
+    if (result.success && origUuid) {
+        await callTool("scene_open", { uuid: origUuid });
+        await new Promise(r => setTimeout(r, 1000));
         await callTool("asset_delete", { path: testPath });
+    }
+
+    // 2. path なしでの作成（scene:new-scene または自動 fallback）
+    const result2 = await callTool("scene_create", {});
+    assert(result2.success === true, `scene_create without path (method: ${result2.method || "new-scene"})`);
+
+    // 元のシーンに戻してクリーンアップ
+    if (result2.success && origUuid) {
+        await callTool("scene_open", { uuid: origUuid });
+        await new Promise(r => setTimeout(r, 1000));
+        // fallback で作成された場合はファイルを削除
+        if (result2.path) {
+            await callTool("asset_delete", { path: result2.path });
+        }
     }
 }
 
