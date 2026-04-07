@@ -1,5 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
+import { parseMaybeJson } from "../utils";
 
 const EXT_NAME = "cocos-creator-mcp";
 
@@ -111,11 +112,15 @@ export class ComponentTools implements ToolCategory {
                 return this.removeComponent(args.uuid, compType);
             case "component_get_components":
                 return this.getComponents(args.uuid);
-            case "component_set_property":
-                if (args.properties && Array.isArray(args.properties)) {
-                    return this.setProperties(args.uuid, compType, args.properties);
+            case "component_set_property": {
+                const properties = parseMaybeJson(args.properties);
+                if (properties && Array.isArray(properties)) {
+                    // バッチモード: properties[].value も parseMaybeJson
+                    const parsed = properties.map((p: any) => ({ ...p, value: parseMaybeJson(p.value) }));
+                    return this.setProperties(args.uuid, compType, parsed);
                 }
-                return this.setProperty(args.uuid, compType, args.property, args.value);
+                return this.setProperty(args.uuid, compType, args.property, parseMaybeJson(args.value));
+            }
             case "component_get_info": {
                 try {
                     const dump = await (Editor.Message.request as any)("scene", "query-component", args.componentUuid);

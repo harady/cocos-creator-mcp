@@ -1,6 +1,7 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
 import { getGameLogs, clearGameLogs, queueGameCommand, getCommandResult } from "../mcp-server";
+import { parseMaybeJson } from "../utils";
 
 export class DebugTools implements ToolCategory {
     readonly categoryName = "debug";
@@ -244,14 +245,8 @@ export class DebugTools implements ToolCategory {
                 case "debug_open_url":
                     await (Editor.Message.request as any)("program", "open-url", args.url);
                     return ok({ success: true, url: args.url });
-                case "debug_game_command": {
-                    // args.args は MCP クライアントによってはJSON文字列で来るためパースして吸収
-                    let innerArgs = args.args;
-                    if (typeof innerArgs === "string") {
-                        try { innerArgs = JSON.parse(innerArgs); } catch { /* string のまま */ }
-                    }
-                    return this.gameCommand(args.type || args.command, innerArgs, args.timeout || 5000, args.maxWidth, args.imageFormat);
-                }
+                case "debug_game_command":
+                    return this.gameCommand(args.type || args.command, parseMaybeJson(args.args), args.timeout || 5000, args.maxWidth, args.imageFormat);
                 case "debug_screenshot":
                     return this.takeScreenshot(args.savePath, args.maxWidth);
                 case "debug_preview":

@@ -1,5 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
+import { parseMaybeJson } from "../utils";
 
 const EXT_NAME = "cocos-creator-mcp";
 
@@ -190,7 +191,7 @@ export class NodeTools implements ToolCategory {
             case "node_find_by_name":
                 return this.findByName(args.name);
             case "node_set_property":
-                return this.setProperty(args.uuid, args.property, args.value);
+                return this.setProperty(args.uuid, args.property, parseMaybeJson(args.value));
             case "node_set_transform":
                 return this.setTransform(args.uuid, args.position, args.rotation, args.scale);
             case "node_delete":
@@ -206,7 +207,7 @@ export class NodeTools implements ToolCategory {
             case "node_set_layer":
                 return this.setProperty(args.uuid, "layer", args.layer);
             case "node_create_tree":
-                return this.createNodeTree(args.parent, args.spec);
+                return this.createNodeTree(args.parent, parseMaybeJson(args.spec));
             case "node_detect_type": {
                 try {
                     const info = await this.sceneScript("getNodeInfo", [args.uuid]);
