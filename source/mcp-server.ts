@@ -1,5 +1,6 @@
 import http from "http";
 import { ToolCategory, ToolDefinition, JsonRpcRequest, JsonRpcResponse, ServerConfig, DEFAULT_CONFIG } from "./types";
+import { archiveOldFiles } from "./archive";
 
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const SESSION_ID = `cocos-mcp-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
@@ -235,6 +236,9 @@ export class McpServer {
                     size: buffer.length,
                     createdAt: new Date().toISOString(),
                 });
+                if (this.config.autoArchiveRecordings) {
+                    archiveOldFiles(dir);
+                }
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ success: true, path: filePath, size: buffer.length }));
             } catch (e: any) {

@@ -61,6 +61,14 @@ module.exports = Editor.Panel.define({
     </div>
     <div class="row">
         <button @click="openSaveFolder" class="btn btn-small">📂 保存フォルダを開く</button>
+        <label class="checkbox-label" title="ONにすると、録画/スクショ保存時に24時間以上前のファイルを OLD_yyyyMM フォルダに自動移動します"><input type="checkbox" v-model="autoArchive" @change="onAutoArchiveChange" /> 古いファイルを自動整理</label>
+        <button class="btn btn-help" @click="showArchiveHelp = !showArchiveHelp" title="自動整理の説明">?</button>
+    </div>
+    <div v-if="showArchiveHelp" class="help-box">
+        <strong>自動整理について</strong><br>
+        ONにすると、録画やスクショを保存するたびに、24時間以上前の古いファイルを<br>
+        <code>OLD_yyyyMM/</code> フォルダ（例: OLD_202604/）に自動で移動します。<br>
+        保存フォルダ直下には直近のファイルだけが残り、整理された状態を保てます。
     </div>
 
     <div v-if="lastResult" class="result" :class="lastError ? 'error' : 'success'">
@@ -131,6 +139,12 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
 .result.success { background: #1a3a1a; color: #afa; }
 .result.error { background: #3a1a1a; color: #faa; }
 .result code { font-size: 10px; word-break: break-all; background: #000; padding: 2px 4px; border-radius: 2px; }
+.checkbox-label { font-size: 12px; display: flex; align-items: center; gap: 4px; margin-left: auto; cursor: pointer; }
+.checkbox-label input[type="checkbox"] { cursor: pointer; }
+.btn-help { padding: 2px 7px; background: #555; font-size: 11px; font-weight: bold; border-radius: 50%; min-width: 20px; margin-left: 4px; }
+.btn-help:hover { background: #777; }
+.help-box { margin: 8px 0; padding: 10px; background: #1a2a3a; border: 1px solid #345; border-radius: 4px; font-size: 11px; line-height: 1.6; color: #bcd; }
+.help-box code { background: #000; padding: 1px 4px; border-radius: 2px; font-size: 10px; }
 .note { margin-top: 16px; padding-top: 8px; border-top: 1px solid #333; font-size: 10px; color: #888; }
     `,
     $: { app: "#app" },
@@ -147,6 +161,17 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
             } catch { return {}; }
         };
         const saved = loadSettings();
+        // プロジェクト設定から autoArchiveRecordings を読み込み
+        const loadProjectConfig = () => {
+            try {
+                const fs = require("fs");
+                const path = require("path");
+                const p = path.join(Editor.Project.path, "settings", "cocos-creator-mcp.json");
+                if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf-8"));
+            } catch { /* ignore */ }
+            return {};
+        };
+        const projectCfg = loadProjectConfig();
         const app = createAppRec({
             data() {
                 return {
@@ -161,6 +186,8 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     format: saved.format ?? "mp4",
                     savePath: saved.savePath ?? "temp/recordings",
                     shotFormat: saved.shotFormat ?? "png",
+                    autoArchive: projectCfg.autoArchiveRecordings ?? false,
+                    showArchiveHelp: false,
                     lastResult: null as any,
                     lastError: false,
                     _startTime: 0,
@@ -182,8 +209,34 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                     for (const key of PERSISTED_KEYS) data[key] = this[key];
                     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
                 },
+                async isPreviewRunning(this: any): Promise<boolean> {
+                    try {
+                        const res = await fetch(`${MCP_BASE}/mcp`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                jsonrpc: "2.0", id: 98, method: "tools/call",
+                                params: {
+                                    name: "debug_game_command",
+                                    arguments: { type: "inspect", args: { name: "Canvas" }, timeout: 1500 },
+                                },
+                            }),
+                        });
+                        const json = await res.json();
+                        const content = json.result?.content?.[0]?.text;
+                        const parsed = content ? JSON.parse(content) : null;
+                        return !!parsed?.success;
+                    } catch {
+                        return false;
+                    }
+                },
                 async start(this: any) {
                     this.lastResult = null;
+                    if (!await this.isPreviewRunning()) {
+                        this.lastResult = { error: "ゲームプレビューが実行されていません。プレビューを開始してから録画してください。" };
+                        this.lastError = true;
+                        return;
+                    }
                     try {
                         const res = await fetch(`${MCP_BASE}/mcp`, {
                             method: "POST",
@@ -291,8 +344,29 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                 resetSavePath(this: any) {
                     this.savePath = "temp/recordings";
                 },
+                onAutoArchiveChange(this: any) {
+                    try {
+                        const fs = require("fs");
+                        const path = require("path");
+                        const p = path.join(Editor.Project.path, "settings", "cocos-creator-mcp.json");
+                        let cfg: any = {};
+                        if (fs.existsSync(p)) cfg = JSON.parse(fs.readFileSync(p, "utf-8"));
+                        cfg.autoArchiveRecordings = this.autoArchive;
+                        const dir = path.dirname(p);
+                        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                        fs.writeFileSync(p, JSON.stringify(cfg, null, 2), "utf-8");
+                    } catch (e) {
+                        console.warn("[recorder] 設定保存失敗:", e);
+                    }
+                },
                 async screenshot(this: any) {
                     this.shooting = true;
+                    if (!await this.isPreviewRunning()) {
+                        this.lastResult = { error: "ゲームプレビューが実行されていません。プレビューを開始してからスクショしてください。" };
+                        this.lastError = true;
+                        this.shooting = false;
+                        return;
+                    }
                     try {
                         const res = await fetch(`${MCP_BASE}/mcp`, {
                             method: "POST",
@@ -322,6 +396,17 @@ h2 { margin: 0 0 12px 0; font-size: 18px; }
                             const ext = path.extname(parsed.path) || ".png";
                             const destPath = path.join(destDir, `screenshot_${ts}${ext}`);
                             fs.copyFileSync(parsed.path, destPath);
+                            // 設定に応じて古いファイルをアーカイブ
+                            try {
+                                const settingsPath = path.join(projectPath, "settings", "cocos-creator-mcp.json");
+                                if (fs.existsSync(settingsPath)) {
+                                    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+                                    if (cfg.autoArchiveRecordings) {
+                                        const { archiveOldFiles } = require("../../archive");
+                                        archiveOldFiles(destDir);
+                                    }
+                                }
+                            } catch { /* ignore */ }
                             this.lastResult = { kind: "shot", path: destPath, size: parsed.size };
                             this.lastError = false;
                         } else {
