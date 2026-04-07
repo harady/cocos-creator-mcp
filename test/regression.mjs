@@ -62,7 +62,8 @@ const ALL_TOOLS = [
     "debug_get_editor_info", "debug_get_extension_info", "debug_get_log_file_info",
     "debug_get_project_logs", "debug_list_extensions", "debug_list_messages",
     "debug_open_url", "debug_query_devices", "debug_search_project_logs", "debug_validate_scene",
-    "debug_batch_screenshot", "debug_record_start", "debug_record_stop",
+    "debug_batch_screenshot", "debug_game_command", "debug_screenshot",
+    "debug_record_start", "debug_record_stop",
     "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
     "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
     "node_set_property", "node_set_transform",
@@ -677,6 +678,139 @@ async function testV18NewTools() {
     assert(!!stopTool, "debug_record_stop registered");
 }
 
+async function testStringifiedArgs() {
+    console.log("\n── stringified args prevention ──");
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (!canvasUuid) { skip("stringified args (no Canvas)"); return; }
+
+    // 1. node_set_property — value がJSON文字列で届いても動くか
+    const n1 = await callTool("node_create", { name: "StrArgTest", parent: canvasUuid });
+    const setPosStr = await callTool("node_set_property", {
+        uuid: n1.uuid, property: "position", value: JSON.stringify({ x: 42, y: 0, z: 0 }),
+    });
+    assert(setPosStr.success === true, "node_set_property with stringified value");
+    const info1 = await callTool("node_get_info", { uuid: n1.uuid });
+    assert(info1.data?.position?.x === 42, "position.x == 42 after stringified set");
+    await callTool("node_delete", { uuid: n1.uuid });
+
+    // 2. node_create_tree — spec がJSON文字列で届いても動くか
+    const treeStr = await callTool("node_create_tree", {
+        parent: canvasUuid,
+        spec: JSON.stringify({ name: "StrTreeTest", components: ["cc.UITransform"] }),
+    });
+    assert(treeStr.success === true, "node_create_tree with stringified spec");
+    if (treeStr.data?.uuid) await callTool("node_delete", { uuid: treeStr.data.uuid });
+
+    // 3. component_set_property — value がJSON文字列で届いても動くか
+    const n3 = await callTool("node_create", { name: "CompStrTest", parent: canvasUuid, components: ["cc.UITransform"] });
+    const setCS = await callTool("component_set_property", {
+        uuid: n3.uuid, componentType: "cc.UITransform",
+        property: "contentSize", value: JSON.stringify({ width: 100, height: 200 }),
+    });
+    assert(setCS.success === true, "component_set_property with stringified value");
+
+    // 4. component_set_property batch — properties がJSON文字列で届いても動くか
+    const setBatch = await callTool("component_set_property", {
+        uuid: n3.uuid, componentType: "cc.UITransform",
+        properties: JSON.stringify([{ property: "contentSize", value: { width: 300, height: 400 } }]),
+    });
+    assert(setBatch.success === true, "component_set_property batch with stringified properties");
+    await callTool("node_delete", { uuid: n3.uuid });
+}
+
+async function testUncoveredTools() {
+    console.log("\n── uncovered tools (minimum 1 call) ──");
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+
+    // debug tools (editor-only, no preview required)
+    const clearRes = await callTool("debug_clear_console");
+    assert(clearRes.success === true || !clearRes._rpcError, "debug_clear_console");
+
+    const extInfo = await callTool("debug_get_extension_info", { name: "cocos-creator-mcp" });
+    assert(extInfo.success === true || !extInfo._rpcError, "debug_get_extension_info");
+
+    const searchLogs = await callTool("debug_search_project_logs", { keyword: "test", count: 5 });
+    assert(searchLogs.success === true || !searchLogs._rpcError, "debug_search_project_logs");
+
+    const devices = await callTool("debug_query_devices");
+    assert(devices.success === true || !devices._rpcError, "debug_query_devices");
+
+    // scene tools (read-only or safe)
+    const queryComps = await callTool("scene_query_components");
+    assert(queryComps.success === true || !queryComps._rpcError, "scene_query_components");
+
+    const queryBounds = await callTool("scene_query_scene_bounds");
+    assert(queryBounds.success === true || !queryBounds._rpcError, "scene_query_scene_bounds");
+
+    if (canvasUuid) {
+        const queryComp = await callTool("scene_query_component", { uuid: canvasUuid, componentType: "cc.UITransform" });
+        assert(queryComp.success === true || !queryComp._rpcError, "scene_query_component");
+
+        // scene_set_parent (create two nodes, reparent, cleanup)
+        const pNode = await callTool("node_create", { name: "ParentTest", parent: canvasUuid });
+        const cNode = await callTool("node_create", { name: "ChildTest", parent: canvasUuid });
+        if (pNode.uuid && cNode.uuid) {
+            const sp = await callTool("scene_set_parent", { uuid: cNode.uuid, parentUuid: pNode.uuid });
+            assert(sp.success === true || !sp._rpcError, "scene_set_parent");
+            await callTool("node_delete", { uuid: pNode.uuid });
+        }
+
+        // node_set_layer
+        const layerNode = await callTool("node_create", { name: "LayerTest", parent: canvasUuid });
+        if (layerNode.uuid) {
+            const sl = await callTool("node_set_layer", { uuid: layerNode.uuid, layer: 1 << 25 });
+            assert(sl.success === true || !sl._rpcError, "node_set_layer");
+            await callTool("node_delete", { uuid: layerNode.uuid });
+        }
+
+        // scene undo (begin + cancel)
+        const beginUndo = await callTool("scene_begin_undo");
+        assert(beginUndo.success === true || !beginUndo._rpcError, "scene_begin_undo");
+        const cancelUndo = await callTool("scene_cancel_undo");
+        assert(cancelUndo.success === true || !cancelUndo._rpcError, "scene_cancel_undo");
+
+        // view tools (safe set + restore)
+        const origGrid = await callTool("view_query_grid_visible");
+        const setGrid = await callTool("view_set_grid_visible", { visible: true });
+        assert(setGrid.success === true || !setGrid._rpcError, "view_set_grid_visible");
+
+        const focusRes = await callTool("view_focus_on_node", { uuid: canvasUuid });
+        assert(focusRes.success === true || !focusRes._rpcError, "view_focus_on_node");
+
+        const changeTool = await callTool("view_change_gizmo_tool", { tool: "move" });
+        assert(changeTool.success === true || !changeTool._rpcError, "view_change_gizmo_tool");
+
+        const resetView = await callTool("view_reset");
+        assert(resetView.success === true || !resetView._rpcError, "view_reset");
+    }
+
+    // project tools
+    const scripts = await callTool("project_query_scripts");
+    assert(scripts.success === true || !scripts._rpcError, "project_query_scripts");
+
+    // asset tools
+    const missingAssets = await callTool("asset_query_missing");
+    assert(missingAssets.success === true || !missingAssets._rpcError, "asset_query_missing");
+
+    // preferences tools
+    const prefGet = await callTool("preferences_get", { protocol: "general", key: "language" });
+    assert(prefGet.success === true || !prefGet._rpcError, "preferences_get");
+
+    // scene_execute_script (read-only expression)
+    const execScript = await callTool("scene_execute_script", { script: "1 + 1" });
+    assert(execScript.success === true || !execScript._rpcError, "scene_execute_script");
+
+    // debug_execute_script (read-only expression)
+    const debugExec = await callTool("debug_execute_script", { script: "2 + 2" });
+    assert(debugExec.success === true || !debugExec._rpcError, "debug_execute_script");
+
+    // scene_soft_reload
+    const softReload = await callTool("scene_soft_reload");
+    assert(softReload.success === true || !softReload._rpcError, "scene_soft_reload");
+}
+
 // テスト失敗等で残った (Missing Node) 等のゴミを一括削除
 async function cleanupOrphanNodes() {
     console.log("\n── cleanup: removing orphan nodes ──");
@@ -748,6 +882,8 @@ async function main() {
     await testNewEditorAPIs();
     await testV16NewTools();
     await testV18NewTools();
+    await testStringifiedArgs();
+    await testUncoveredTools();
     await cleanupOrphanNodes();
 
     console.log(`\n${"═".repeat(40)}`);
