@@ -470,6 +470,35 @@ export const methods: Record<string, (...args: any[]) => any> = {
         }
     },
 
+    /**
+     * Prefab 編集モードで開いている Prefab のファイルパスを取得する.
+     */
+    getPrefabEditingPath() {
+        try {
+            const cc = require("cc");
+            // シーンのルートノードの PrefabInfo からアセットを取得
+            const scene = cc.director.getScene();
+            if (!scene) return { success: false, error: "No scene" };
+
+            // Prefab 編集モードでは Canvas の最初の子がPrefabルート
+            const canvas = scene.getChildByName("Canvas");
+            if (!canvas) return { success: false, error: "No Canvas" };
+
+            for (let i = 0; i < canvas.children.length; i++) {
+                const child = canvas.children[i];
+                if (child._prefab?.asset) {
+                    const asset = child._prefab.asset;
+                    // asset._nativeUrl or asset._uuid からパスを復元
+                    const uuid = asset._uuid || asset.uuid;
+                    return { success: true, uuid, name: child.name };
+                }
+            }
+            return { success: false, error: "No prefab asset found" };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    },
+
     testLog(message: string = "test message") {
         console.log("[testLog]", message);
         const methods = Object.keys(exports.methods || {});

@@ -16,6 +16,8 @@ interface NestedPrefabEntry {
 export class PrefabTools implements ToolCategory {
     readonly categoryName = "prefab";
     private _pendingNestedPrefabs: NestedPrefabEntry[] = [];
+    /** prefab_open で開いた Prefab アセット UUID */
+    private _currentPrefabUuid: string | null = null;
 
     getTools(): ToolDefinition[] {
         return [
@@ -271,31 +273,21 @@ export class PrefabTools implements ToolCategory {
     /**
      * prefab_update 後に Prefab JSON を後処理して、ネスト Prefab 参照を正しく設定する.
      */
-    private async _fixNestedPrefabJson(rootNodeUuid: string): Promise<void> {
+    private async _fixNestedPrefabJson(_rootNodeUuid: string): Promise<void> {
         if (this._pendingNestedPrefabs.length === 0) return;
 
         try {
             // シーンを保存して Prefab JSON を書き出す
             await (Editor.Message.send as any)("scene", "save-scene");
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 1500));
 
-            // ルートノードの Prefab アセット情報を取得
-            const nodeInfo = await this.sceneScript("getNodeInfo", [rootNodeUuid]);
-            if (!nodeInfo?.success) return;
+            // prefab_open で記憶した UUID からファイルパスを取得
+            if (!this._currentPrefabUuid) return;
 
-            // Prefab ファイルパスを取得
-            // scene_get_hierarchy から Prefab のシーン名を取得してパスを逆引き
-            const hier = await Editor.Message.request("scene", "query-hierarchy");
-            // Prefab 編集モードでは sceneName が Prefab パスを含む
-            const sceneName: string = (hier as any)?.name || "";
-            if (!sceneName.includes(".prefab")) return;
-
-            // db:// パスからファイルシステムパスに変換
-            const dbPath = sceneName.replace("-scene", "");
-            const fsPathResult = await (Editor.Message.request as any)("asset-db", "query-path", dbPath);
-            if (!fsPathResult) return;
-
-            const prefabPath = fsPathResult;
+            const prefabPath = await (Editor.Message.request as any)(
+                "asset-db", "query-path", this._currentPrefabUuid
+            );
+            if (!prefabPath) return;
             if (!fs.existsSync(prefabPath)) return;
 
             const data = JSON.parse(fs.readFileSync(prefabPath, "utf-8"));
@@ -466,6 +458,9 @@ export class PrefabTools implements ToolCategory {
             await (Editor.Message.request as any)("asset-db", "open-asset", assetUuid);
             // Wait for prefab editing mode to initialize
             await new Promise(r => setTimeout(r, 1000));
+
+            this._currentPrefabUuid = assetUuid;
+            this._pendingNestedPrefabs = [];
 
             return ok({ success: true, uuid: assetUuid, mode: "prefab-edit" });
         } catch (e: any) {
