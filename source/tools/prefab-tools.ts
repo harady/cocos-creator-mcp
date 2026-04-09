@@ -1,6 +1,8 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
 
+const EXT_NAME = "cocos-creator-mcp";
+
 export class PrefabTools implements ToolCategory {
     readonly categoryName = "prefab";
 
@@ -219,15 +221,24 @@ export class PrefabTools implements ToolCategory {
 
     private async instantiatePrefab(prefabUuid: string, parent?: string): Promise<ToolResult> {
         try {
-            const result = await Editor.Message.request("scene", "create-node", {
+            const nodeUuid = await Editor.Message.request("scene", "create-node", {
                 parent: parent || undefined,
                 assetUuid: prefabUuid,
             });
-            return ok({ success: true, nodeUuid: result, prefabUuid });
+
+            // Prefab 編集モード中の場合、ネスト Prefab として親に登録
+            if (parent) {
+                try {
+                    await this.sceneScript("registerNestedPrefabInstance", [parent, nodeUuid, prefabUuid]);
+                } catch { /* Prefab 編集モードでない場合は無視 */ }
+            }
+
+            return ok({ success: true, nodeUuid, prefabUuid });
         } catch (e: any) {
             return err(e.message || String(e));
         }
     }
+
 
     private async updatePrefab(nodeUuid: string): Promise<ToolResult> {
         try {

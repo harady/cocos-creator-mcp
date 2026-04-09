@@ -398,6 +398,78 @@ export const methods: Record<string, (...args: any[]) => any> = {
         }
     },
 
+    /**
+     * ネスト Prefab のインスタンスルートを親 PrefabInfo に登録する.
+     * prefab_instantiate 後に呼び出すことで、親 Prefab 保存時にネスト参照が保持される.
+     *
+     * @param parentUuid 親ノード（Prefab 編集モードのルートノード）のUUID
+     * @param childUuid  インスタンス化した子ノードの UUID
+     * @param prefabAssetUuid 子 Prefab のアセット UUID
+     */
+    registerNestedPrefabInstance(parentUuid: string, childUuid: string, prefabAssetUuid: string) {
+        try {
+            const cc = require("cc");
+            const parent = findNode(parentUuid);
+            const child = findNode(childUuid);
+            if (!parent) return { success: false, error: `Parent ${parentUuid} not found` };
+            if (!child) return { success: false, error: `Child ${childUuid} not found` };
+
+            // Prefab 編集モードのルートノードを探す
+            let prefabRoot = parent;
+            while (prefabRoot._parent) prefabRoot = prefabRoot._parent;
+
+            const rootPrefab = prefabRoot._prefab;
+            if (!rootPrefab) return { success: false, error: "Root has no PrefabInfo" };
+
+            // 1. nestedPrefabInstanceRoots に子ノードを追加
+            if (!rootPrefab.nestedPrefabInstanceRoots) {
+                rootPrefab.nestedPrefabInstanceRoots = [];
+            }
+            const already = rootPrefab.nestedPrefabInstanceRoots.some(
+                (n: any) => n === child || n?.uuid === child.uuid
+            );
+            if (!already) {
+                rootPrefab.nestedPrefabInstanceRoots.push(child);
+            }
+
+            // 2. 子の PrefabInfo を設定
+            if (!child._prefab) {
+                child._prefab = new cc.PrefabInfo();
+            }
+            const childPrefab = child._prefab;
+            childPrefab.root = child;
+
+            // asset を外部 Prefab UUID に設定
+            // cc.assetManager でPrefabアセットを取得
+            const prefabAsset = cc.assetManager.getAssetByUuid(prefabAssetUuid);
+            if (prefabAsset) {
+                childPrefab.asset = prefabAsset;
+            }
+
+            // 3. PrefabInstance を設定
+            if (!childPrefab.instance) {
+                childPrefab.instance = new cc.PrefabInstance();
+                childPrefab.instance.prefabRootNode = prefabRoot;
+                childPrefab.instance.propertyOverrides = [];
+                childPrefab.instance.mountedChildren = [];
+                childPrefab.instance.mountedComponents = [];
+                childPrefab.instance.removedComponents = [];
+            }
+
+            return {
+                success: true,
+                parentUuid,
+                childUuid,
+                prefabAssetUuid,
+                nestedCount: rootPrefab.nestedPrefabInstanceRoots.length,
+                hasInstance: !!childPrefab.instance,
+                hasAsset: !!childPrefab.asset,
+            };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    },
+
     testLog(message: string = "test message") {
         console.log("[testLog]", message);
         const methods = Object.keys(exports.methods || {});
