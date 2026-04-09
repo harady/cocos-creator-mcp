@@ -1,10 +1,21 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 
 const EXT_NAME = "cocos-creator-mcp";
 
+/** prefab_instantiate で配置したネスト Prefab 情報を記憶 */
+interface NestedPrefabEntry {
+    nodeUuid: string;
+    prefabAssetUuid: string;
+    parentUuid: string;
+}
+
 export class PrefabTools implements ToolCategory {
     readonly categoryName = "prefab";
+    private _pendingNestedPrefabs: NestedPrefabEntry[] = [];
 
     getTools(): ToolDefinition[] {
         return [
@@ -226,11 +237,13 @@ export class PrefabTools implements ToolCategory {
                 assetUuid: prefabUuid,
             });
 
-            // Prefab 編集モード中の場合、ネスト Prefab として親に登録
+            // ネスト Prefab 情報を記憶（prefab_update 時に JSON 後処理で使用）
             if (parent) {
-                try {
-                    await this.sceneScript("registerNestedPrefabInstance", [parent, nodeUuid, prefabUuid]);
-                } catch { /* Prefab 編集モードでない場合は無視 */ }
+                this._pendingNestedPrefabs.push({
+                    nodeUuid,
+                    prefabAssetUuid: prefabUuid,
+                    parentUuid: parent,
+                });
             }
 
             return ok({ success: true, nodeUuid, prefabUuid });
@@ -243,9 +256,135 @@ export class PrefabTools implements ToolCategory {
     private async updatePrefab(nodeUuid: string): Promise<ToolResult> {
         try {
             const result = await (Editor.Message.request as any)("scene", "apply-prefab", nodeUuid);
+
+            // ネスト Prefab の JSON 後処理
+            if (this._pendingNestedPrefabs.length > 0) {
+                await this._fixNestedPrefabJson(nodeUuid);
+            }
+
             return ok({ success: true, nodeUuid, result });
         } catch (e: any) {
             return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * prefab_update 後に Prefab JSON を後処理して、ネスト Prefab 参照を正しく設定する.
+     */
+    private async _fixNestedPrefabJson(rootNodeUuid: string): Promise<void> {
+        if (this._pendingNestedPrefabs.length === 0) return;
+
+        try {
+            // シーンを保存して Prefab JSON を書き出す
+            await (Editor.Message.send as any)("scene", "save-scene");
+            await new Promise(r => setTimeout(r, 1000));
+
+            // ルートノードの Prefab アセット情報を取得
+            const nodeInfo = await this.sceneScript("getNodeInfo", [rootNodeUuid]);
+            if (!nodeInfo?.success) return;
+
+            // Prefab ファイルパスを取得
+            // scene_get_hierarchy から Prefab のシーン名を取得してパスを逆引き
+            const hier = await Editor.Message.request("scene", "query-hierarchy");
+            // Prefab 編集モードでは sceneName が Prefab パスを含む
+            const sceneName: string = (hier as any)?.name || "";
+            if (!sceneName.includes(".prefab")) return;
+
+            // db:// パスからファイルシステムパスに変換
+            const dbPath = sceneName.replace("-scene", "");
+            const fsPathResult = await (Editor.Message.request as any)("asset-db", "query-path", dbPath);
+            if (!fsPathResult) return;
+
+            const prefabPath = fsPathResult;
+            if (!fs.existsSync(prefabPath)) return;
+
+            const data = JSON.parse(fs.readFileSync(prefabPath, "utf-8"));
+
+            // 各ネスト Prefab エントリを処理
+            for (const entry of this._pendingNestedPrefabs) {
+                // fileId でノードを検索（nodeUuid はシーン内 UUID、Prefab JSON 内では fileId）
+                let flpNodeIdx = -1;
+                for (let i = 0; i < data.length; i++) {
+                    if (data[i].__type__ === "cc.PrefabInfo" && data[i].fileId === entry.nodeUuid) {
+                        // この PrefabInfo を持つノードを探す
+                        for (let j = 0; j < data.length; j++) {
+                            if (data[j]._prefab?.__id__ === i) {
+                                flpNodeIdx = j;
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                // fileId で見つからない場合、ノード名で検索
+                if (flpNodeIdx < 0) {
+                    // Prefab アセット名を取得
+                    const assetInfo = await (Editor.Message.request as any)("asset-db", "query-asset-info", entry.prefabAssetUuid);
+                    const assetName = assetInfo?.name?.replace(".prefab", "") || "";
+                    for (let i = 0; i < data.length; i++) {
+                        if (data[i].__type__ === "cc.Node" && (data[i]._name === assetName || data[i]._name === undefined)) {
+                            const prefabIdx = data[i]._prefab?.__id__;
+                            if (prefabIdx != null && data[prefabIdx]?.asset?.__id__ === 0 && !data[prefabIdx]?.instance) {
+                                flpNodeIdx = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (flpNodeIdx < 0) continue;
+
+                const prefabInfoIdx = data[flpNodeIdx]._prefab?.__id__;
+                if (prefabInfoIdx == null) continue;
+
+                // PrefabInfo を修正
+                const prefabInfo = data[prefabInfoIdx];
+                prefabInfo.root = { __id__: flpNodeIdx };
+                prefabInfo.asset = {
+                    __uuid__: entry.prefabAssetUuid,
+                    __expectedType__: "cc.Prefab",
+                };
+
+                // PrefabInstance を追加
+                if (!prefabInfo.instance) {
+                    const instanceIdx = data.length;
+                    data.push({
+                        __type__: "cc.PrefabInstance",
+                        fileId: crypto.randomBytes(16).toString("base64").replace(/[+/=]/g, "").substring(0, 22),
+                        prefabRootNode: { __id__: 1 }, // Prefab 編集モードのルート
+                        mountedChildren: [],
+                        mountedComponents: [],
+                        propertyOverrides: [],
+                        removedComponents: [],
+                    });
+                    prefabInfo.instance = { __id__: instanceIdx };
+                }
+
+                // 子ノード・コンポーネントをクリア（Prefab アセットから復元される）
+                data[flpNodeIdx]._children = [];
+                data[flpNodeIdx]._components = [];
+
+                // ルートの nestedPrefabInstanceRoots に追加
+                const rootPrefabIdx = data[1]._prefab?.__id__;
+                if (rootPrefabIdx != null) {
+                    const rootPrefab = data[rootPrefabIdx];
+                    if (!rootPrefab.nestedPrefabInstanceRoots) {
+                        rootPrefab.nestedPrefabInstanceRoots = [];
+                    }
+                    const alreadyNested = rootPrefab.nestedPrefabInstanceRoots.some(
+                        (r: any) => r?.__id__ === flpNodeIdx
+                    );
+                    if (!alreadyNested) {
+                        rootPrefab.nestedPrefabInstanceRoots.push({ __id__: flpNodeIdx });
+                    }
+                }
+            }
+
+            fs.writeFileSync(prefabPath, JSON.stringify(data, null, 2), "utf-8");
+            this._pendingNestedPrefabs = [];
+        } catch (e: any) {
+            console.warn("[PrefabTools] _fixNestedPrefabJson failed:", e.message);
         }
     }
 
