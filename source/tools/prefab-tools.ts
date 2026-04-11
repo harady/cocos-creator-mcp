@@ -1,5 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
+import { ensureSceneSafeToSwitch, safeSaveScene } from "./scene-tools";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -123,23 +124,25 @@ export class PrefabTools implements ToolCategory {
             },
             {
                 name: "prefab_open",
-                description: "Open a prefab in editing mode. Equivalent to double-clicking the prefab in CocosCreator. Save the current scene first if needed.",
+                description: "Open a prefab in editing mode. Equivalent to double-clicking the prefab in CocosCreator. Returns an error if the current scene is dirty and untitled (to avoid modal save dialog); pass force=true to bypass.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         uuid: { type: "string", description: "Prefab asset UUID" },
                         path: { type: "string", description: "Prefab db:// path (alternative to uuid)" },
+                        force: { type: "boolean", description: "Skip dirty-scene preflight check (may trigger modal save dialog)" },
                     },
                 },
             },
             {
                 name: "prefab_close",
-                description: "Save and close the current prefab editing mode, then return to the main scene.",
+                description: "Save and close the current prefab editing mode, then return to the main scene. Returns an error if the current prefab is dirty and untitled (to avoid modal save dialog); pass force=true to bypass.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         save: { type: "boolean", description: "Save prefab before closing (default true)" },
                         sceneUuid: { type: "string", description: "Scene UUID to return to (default: project's start scene or first scene)" },
+                        force: { type: "boolean", description: "Skip dirty-scene preflight check (may trigger modal save dialog)" },
                     },
                 },
             },
@@ -176,9 +179,9 @@ export class PrefabTools implements ToolCategory {
             case "prefab_create_and_replace":
                 return this.createAndReplace(args.uuid, args.path);
             case "prefab_open":
-                return this.openPrefab(args.uuid, args.path);
+                return this.openPrefab(args.uuid, args.path, !!args.force);
             case "prefab_close":
-                return this.closePrefab(args.save !== false, args.sceneUuid);
+                return this.closePrefab(args.save !== false, args.sceneUuid, !!args.force);
             default:
                 return err(`Unknown tool: ${toolName}`);
         }
@@ -279,7 +282,18 @@ export class PrefabTools implements ToolCategory {
 
         try {
             // シーンを保存して Prefab JSON を書き出す
-            await (Editor.Message.send as any)("scene", "save-scene");
+            // 現在シーンが untitled (scene-2d) の場合、save-scene はダイアログを出すので
+            // safeSaveScene でスキップする。untitled でシーンにインスタンスが居るケースは
+            // 本来 prefab_open モードでのみ発生するので save が効く想定だが、
+            // テスト等で直接呼ばれた場合の保護として skip する。
+            const saved = await safeSaveScene();
+            if (!saved) {
+                console.warn(
+                    "[PrefabTools] _fixNestedPrefabJson: save-scene skipped (untitled scene). " +
+                    "Nested prefab JSON post-processing may be incomplete."
+                );
+                return;
+            }
             await new Promise(r => setTimeout(r, 1500));
 
             // prefab_open で記憶した UUID からファイルパスを取得
@@ -443,8 +457,11 @@ export class PrefabTools implements ToolCategory {
         }
     }
 
-    private async openPrefab(uuid?: string, path?: string): Promise<ToolResult> {
+    private async openPrefab(uuid?: string, path?: string, force: boolean = false): Promise<ToolResult> {
         try {
+            // Prefab を開くときも内部的にシーン切替が発生するので dirty untitled チェック
+            await ensureSceneSafeToSwitch(force);
+
             // Resolve UUID from path if needed
             let assetUuid = uuid;
             if (!assetUuid && path) {
@@ -469,11 +486,13 @@ export class PrefabTools implements ToolCategory {
         }
     }
 
-    private async closePrefab(save: boolean, sceneUuid?: string): Promise<ToolResult> {
+    private async closePrefab(save: boolean, sceneUuid?: string, force: boolean = false): Promise<ToolResult> {
         try {
             // 1. Save prefab if requested
+            // prefab edit モード中は "current scene" = 編集中 Prefab なので save-scene は Prefab を保存する。
+            // ただし untitled フォールバックに当たった場合はダイアログ回避のためスキップする。
             if (save) {
-                await (Editor.Message.send as any)("scene", "save-scene");
+                await safeSaveScene();
                 await new Promise(r => setTimeout(r, 500));
             }
 
@@ -499,6 +518,8 @@ export class PrefabTools implements ToolCategory {
 
             // 3. Open the scene
             if (targetScene) {
+                // prefab edit モードから戻る遷移もダイアログが出うる
+                await ensureSceneSafeToSwitch(force);
                 await (Editor.Message.request as any)("scene", "open-scene", targetScene);
                 await new Promise(r => setTimeout(r, 1000));
             }

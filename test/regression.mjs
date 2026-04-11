@@ -733,30 +733,136 @@ async function testSceneCreate() {
     const origScene = await callTool("scene_get_current");
     const origUuid = origScene.uuid || origScene.data?.uuid;
 
+    // scene-2d は dirty untitled 扱いになり preflight でエラーが出うるので force:true でバイパス
     // 1. path 指定での作成
     const testPath = `db://assets/test/SceneCreateTest_${Date.now()}.scene`;
-    const result = await callTool("scene_create", { path: testPath });
+    const result = await callTool("scene_create", { path: testPath, force: true });
     assert(result.success === true, `scene_create with path (method: ${result.method})`);
 
     // 元のシーンに戻してクリーンアップ
     if (result.success && origUuid) {
-        await callTool("scene_open", { uuid: origUuid });
+        await callTool("scene_open", { uuid: origUuid, force: true });
         await new Promise(r => setTimeout(r, 1000));
         await callTool("asset_delete", { path: testPath });
     }
 
     // 2. path なしでの作成（scene:new-scene または自動 fallback）
-    const result2 = await callTool("scene_create", {});
+    const result2 = await callTool("scene_create", { force: true });
     assert(result2.success === true, `scene_create without path (method: ${result2.method || "new-scene"})`);
 
     // 元のシーンに戻してクリーンアップ
     if (result2.success && origUuid) {
-        await callTool("scene_open", { uuid: origUuid });
+        await callTool("scene_open", { uuid: origUuid, force: true });
         await new Promise(r => setTimeout(r, 1000));
         // fallback で作成された場合はファイルを削除
         if (result2.path) {
             await callTool("asset_delete", { path: result2.path });
         }
+    }
+}
+
+// ── dialog prevention (scene-switch guard) ──
+
+async function testDialogPrevention() {
+    console.log("\n── dialog prevention (scene-switch guard) ──");
+
+    // 前提: 保存済みシーン (_regression.scene) 上で実行する必要がある。
+    // 他のテストが scene-2d 等に切り替えている可能性があるので冒頭で _regression に戻す。
+    // _regression に戻せなかった場合は何も副作用を残さず早期 return する。
+    const regInfoPre = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH });
+    const regUuidPre = regInfoPre.uuid || regInfoPre.data?.uuid;
+    if (!regUuidPre) {
+        skip("dialog prevention: _regression.scene not found");
+        return;
+    }
+
+    await callTool("scene_open", { scene: regUuidPre });
+    const switchDeadline = Date.now() + 5000;
+    let switchedToRegression = false;
+    while (Date.now() < switchDeadline) {
+        const now = await callTool("scene_get_current");
+        if ((now.sceneName || now.data?.sceneName) === "_regression") {
+            switchedToRegression = true;
+            break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    if (!switchedToRegression) {
+        skip("dialog prevention: failed to switch to _regression.scene, avoiding side effects");
+        return;
+    }
+
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (!canvasUuid) {
+        skip("dialog prevention: Canvas not found");
+        return;
+    }
+
+    // 1. 現在のシーンを dirty にする
+    const n = await callTool("node_create", { name: `DialogGuardTest_${Date.now()}`, parent: canvasUuid });
+    assert(n.success === true, "setup: created temp node (scene becomes dirty)");
+    const tempNodeUuid = n.uuid || n.data?.uuid;
+
+    // 2. 現在のシーンが保存済みであることを確認
+    const cur = await callTool("scene_get_current");
+    const curName = cur.sceneName || cur.data?.sceneName || "";
+    const isSaved = !["scene-2d", "scene-3d", "Untitled", "NewScene", ""].includes(curName);
+    if (!isSaved) {
+        // setup が正しく機能していれば到達しないはず
+        console.log(`  ⚠️  current scene "${curName}" is untitled, skipping (setup issue?)`);
+        if (tempNodeUuid) await callTool("node_delete", { uuid: tempNodeUuid });
+        return;
+    }
+
+    // 3. 別シーン (MainScene) に切替 — 保存済みシーンなので preflight が auto-save して成功するはず
+    const mainInfo = await callTool("asset_query_uuid", { path: "db://assets/MainScene.scene" });
+    const mainUuid = mainInfo.uuid || mainInfo.data?.uuid;
+    if (!mainUuid) {
+        skip("dialog prevention: MainScene not found");
+        if (tempNodeUuid) await callTool("node_delete", { uuid: tempNodeUuid });
+        return;
+    }
+
+    const switchResult = await callTool("scene_open", { scene: mainUuid });
+    assert(switchResult.success === true,
+        `saved dirty → scene_open auto-saves and switches (got: ${JSON.stringify(switchResult).slice(0, 120)})`);
+
+    // 4. スイッチが完了するまで待機
+    const SWITCH_TIMEOUT_MS = 5000;
+    const deadline = Date.now() + SWITCH_TIMEOUT_MS;
+    let switchedToMain = false;
+    while (Date.now() < deadline) {
+        const now = await callTool("scene_get_current");
+        if ((now.sceneName || now.data?.sceneName) === "MainScene") {
+            switchedToMain = true;
+            break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    assert(switchedToMain, "scene actually switched to MainScene after preflight auto-save");
+
+    // 5. _regression に戻す
+    const regInfo = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH });
+    const regUuid = regInfo.uuid || regInfo.data?.uuid;
+    if (regUuid) {
+        await callTool("scene_open", { scene: regUuid });
+        // settle
+        const deadline2 = Date.now() + SWITCH_TIMEOUT_MS;
+        while (Date.now() < deadline2) {
+            const now = await callTool("scene_get_current");
+            if ((now.sceneName || now.data?.sceneName) === "_regression") break;
+            await new Promise((r) => setTimeout(r, 200));
+        }
+    }
+
+    // クリーンアップ: 元の temp node は auto-save で _regression.scene に保存されてしまっているので、
+    // 新規 load 後は uuid が変わっている。名前ベースで削除を試みる。
+    const finalHier = await callTool("scene_get_hierarchy");
+    const canvas = finalHier.hierarchy?.find((x) => x.name === "Canvas");
+    const leftover = canvas?.children?.find((c) => c.name?.startsWith("DialogGuardTest_"));
+    if (leftover?.uuid) {
+        await callTool("node_delete", { uuid: leftover.uuid });
     }
 }
 
@@ -861,10 +967,19 @@ async function cleanupOrphanNodes() {
         return;
     }
     const targets = [];
+    const ORPHAN_PATTERNS = [
+        /^TestNode_\d+$/,
+        /^DialogGuardTest_\d+$/,
+        /^GuardTest$/,
+        /^UpdateTestNode$/,
+        /^ReplaceTest$/,
+        /^AliasTest$/,
+        /^ChildTest$/,
+    ];
     const walk = (nodes) => {
         if (!Array.isArray(nodes)) return;
         for (const n of nodes) {
-            if (n.name === "(Missing Node)" || /^TestNode_\d+$/.test(n.name)) {
+            if (n.name === "(Missing Node)" || ORPHAN_PATTERNS.some((re) => re.test(n.name))) {
                 targets.push(n.uuid);
             }
             if (n.children) walk(n.children);
@@ -1114,6 +1229,128 @@ async function testStdioBridge() {
     }
 }
 
+// ── test scene setup ──
+
+/**
+ * 回帰テスト専用シーンを用意して開く。
+ *
+ * - CC 直後（現在シーンが untitled かつ clean）ならここから scene_open を呼んで遷移
+ * - 既に untitled dirty 状態なら abort
+ * - 既に _regression.scene 上なら何もしない
+ *
+ * 目的: テスト中に scene_create / scene_open / prefab_create 等で dirty state が
+ * CC 標準の「Save changes?」ダイアログを出す問題を回避するため、保存済みシーンに移動する。
+ */
+const TEST_SCENE_PATH = "db://assets/test/_regression.scene";
+const SOURCE_SCENE_PATH = "db://assets/MainScene.scene"; // クローン元のテンプレート
+
+async function ensureCleanTestScene() {
+    console.log("\n── setup: ensure clean test scene ──");
+
+    const cur = await callTool("scene_get_current");
+    const curName = cur.sceneName || cur.data?.sceneName || "";
+    const isUntitled = ["scene-2d", "scene-3d", "Untitled", "NewScene", ""].includes(curName);
+
+    // 既にテスト用シーン上ならそのまま
+    if (curName === "_regression") {
+        console.log(`  ✅ already on _regression.scene`);
+        passed++;
+        return true;
+    }
+
+    // untitled シーン上の場合: dirty flag が立っていると scene_open で CC 標準の
+    // 「Save changes?」ダイアログが出て MCP が固まる。ノードを削除しても CC の dirty
+    // 履歴は消えないので、この状態では CC 再起動以外に回復手段がない。素直に abort する。
+    if (isUntitled) {
+        const dirtyCheck = await callTool("scene_query_dirty");
+        const isDirty = dirtyCheck.dirty === true || dirtyCheck.data?.dirty === true;
+        if (isDirty) {
+            console.error(
+                `\n❌ Cannot start regression test: current scene "${curName}" is untitled ` +
+                `and has been modified (dirty flag set). CC cannot save an untitled scene ` +
+                `without a modal dialog, and deleting leftover nodes does not clear the dirty ` +
+                `flag.\n   Please restart CocosCreator and run the test again.\n`
+            );
+            failed++;
+            return false;
+        }
+    }
+
+    // _regression.scene の準備:
+    // scene_create の asset-db fallback が生成する最小 JSON は CC が拒否するため、
+    // 既存の MainScene.scene を asset_copy で複製する方式にしている。
+    let info = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH }).catch(() => ({}));
+    let sceneUuid = info.uuid || info.data?.uuid;
+
+    if (!sceneUuid) {
+        console.log(`  cloning ${SOURCE_SCENE_PATH} → ${TEST_SCENE_PATH}...`);
+
+        // ソースの存在確認
+        const srcInfo = await callTool("asset_query_uuid", { path: SOURCE_SCENE_PATH }).catch(() => ({}));
+        const srcUuid = srcInfo.uuid || srcInfo.data?.uuid;
+        if (!srcUuid) {
+            console.error(`  ❌ source scene ${SOURCE_SCENE_PATH} not found; cannot create test scene`);
+            failed++;
+            return false;
+        }
+
+        const copied = await callTool("asset_copy", { source: SOURCE_SCENE_PATH, destination: TEST_SCENE_PATH });
+        if (!copied.success) {
+            console.error(`  ❌ failed to copy test scene: ${JSON.stringify(copied).slice(0, 200)}`);
+            failed++;
+            return false;
+        }
+
+        info = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH }).catch(() => ({}));
+        sceneUuid = info.uuid || info.data?.uuid;
+    }
+
+    if (!sceneUuid) {
+        console.error(`  ❌ could not resolve UUID for ${TEST_SCENE_PATH}`);
+        failed++;
+        return false;
+    }
+
+    // scene_open は非同期ロードで response success が実際の切替完了を保証しない。
+    // 切替が観測できるまで scene_open + scene_get_current の polling を繰り返す。
+    // ここまで来ている時点で current scene は clean が保証されているので force は不要。
+    const SWITCH_TIMEOUT_MS = 15000;
+    const POLL_INTERVAL_MS = 300;
+    const deadline = Date.now() + SWITCH_TIMEOUT_MS;
+    let switched = false;
+    let lastError = "";
+    let openAttempts = 0;
+
+    while (Date.now() < deadline) {
+        const now = await callTool("scene_get_current");
+        const name = now.sceneName || now.data?.sceneName || "";
+        if (name === "_regression") {
+            switched = true;
+            break;
+        }
+        // 切替されていなければ scene_open を再試行（idempotent）
+        openAttempts++;
+        const opened = await callTool("scene_open", { scene: sceneUuid });
+        if (opened.success !== true) {
+            lastError = JSON.stringify(opened).slice(0, 200);
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+
+    if (!switched) {
+        console.error(
+            `  ❌ scene_open did not switch to _regression within ${SWITCH_TIMEOUT_MS}ms ` +
+            `(attempts: ${openAttempts}, last error: ${lastError || "none"})`
+        );
+        failed++;
+        return false;
+    }
+
+    console.log(`  ✅ opened and verified ${TEST_SCENE_PATH} (${openAttempts} open attempt(s))`);
+    passed++;
+    return true;
+}
+
 // ── runner ──
 
 async function main() {
@@ -1132,6 +1369,16 @@ async function main() {
     await testToolsList();
     await testOAuthEndpoints();
     await testStdioBridge();
+
+    // scene 依存テストの前にテスト専用シーンを用意
+    const sceneReady = await ensureCleanTestScene();
+    if (!sceneReady) {
+        console.log(`\n${"═".repeat(40)}`);
+        console.log(`  Setup failed — aborting scene-dependent tests.`);
+        console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);
+        console.log(`${"═".repeat(40)}\n`);
+        process.exit(1);
+    }
     await testSceneTools();
     await testNodeCrud();
     await testComponentTools();
@@ -1156,6 +1403,7 @@ async function main() {
     await testV18NewTools();
     await testStringifiedArgs();
     await testSceneCreate();
+    await testDialogPrevention();
     await testUncoveredTools();
     await cleanupOrphanNodes();
 
