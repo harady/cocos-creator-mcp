@@ -5,6 +5,13 @@
  * 実行: node test/regression.mjs [port]
  */
 
+import { spawn } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const PORT = process.argv[2] || 3000;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -726,30 +733,136 @@ async function testSceneCreate() {
     const origScene = await callTool("scene_get_current");
     const origUuid = origScene.uuid || origScene.data?.uuid;
 
+    // scene-2d は dirty untitled 扱いになり preflight でエラーが出うるので force:true でバイパス
     // 1. path 指定での作成
     const testPath = `db://assets/test/SceneCreateTest_${Date.now()}.scene`;
-    const result = await callTool("scene_create", { path: testPath });
+    const result = await callTool("scene_create", { path: testPath, force: true });
     assert(result.success === true, `scene_create with path (method: ${result.method})`);
 
     // 元のシーンに戻してクリーンアップ
     if (result.success && origUuid) {
-        await callTool("scene_open", { uuid: origUuid });
+        await callTool("scene_open", { uuid: origUuid, force: true });
         await new Promise(r => setTimeout(r, 1000));
         await callTool("asset_delete", { path: testPath });
     }
 
     // 2. path なしでの作成（scene:new-scene または自動 fallback）
-    const result2 = await callTool("scene_create", {});
+    const result2 = await callTool("scene_create", { force: true });
     assert(result2.success === true, `scene_create without path (method: ${result2.method || "new-scene"})`);
 
     // 元のシーンに戻してクリーンアップ
     if (result2.success && origUuid) {
-        await callTool("scene_open", { uuid: origUuid });
+        await callTool("scene_open", { uuid: origUuid, force: true });
         await new Promise(r => setTimeout(r, 1000));
         // fallback で作成された場合はファイルを削除
         if (result2.path) {
             await callTool("asset_delete", { path: result2.path });
         }
+    }
+}
+
+// ── dialog prevention (scene-switch guard) ──
+
+async function testDialogPrevention() {
+    console.log("\n── dialog prevention (scene-switch guard) ──");
+
+    // 前提: 保存済みシーン (_regression.scene) 上で実行する必要がある。
+    // 他のテストが scene-2d 等に切り替えている可能性があるので冒頭で _regression に戻す。
+    // _regression に戻せなかった場合は何も副作用を残さず早期 return する。
+    const regInfoPre = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH });
+    const regUuidPre = regInfoPre.uuid || regInfoPre.data?.uuid;
+    if (!regUuidPre) {
+        skip("dialog prevention: _regression.scene not found");
+        return;
+    }
+
+    await callTool("scene_open", { scene: regUuidPre });
+    const switchDeadline = Date.now() + 5000;
+    let switchedToRegression = false;
+    while (Date.now() < switchDeadline) {
+        const now = await callTool("scene_get_current");
+        if ((now.sceneName || now.data?.sceneName) === "_regression") {
+            switchedToRegression = true;
+            break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    if (!switchedToRegression) {
+        skip("dialog prevention: failed to switch to _regression.scene, avoiding side effects");
+        return;
+    }
+
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (!canvasUuid) {
+        skip("dialog prevention: Canvas not found");
+        return;
+    }
+
+    // 1. 現在のシーンを dirty にする
+    const n = await callTool("node_create", { name: `DialogGuardTest_${Date.now()}`, parent: canvasUuid });
+    assert(n.success === true, "setup: created temp node (scene becomes dirty)");
+    const tempNodeUuid = n.uuid || n.data?.uuid;
+
+    // 2. 現在のシーンが保存済みであることを確認
+    const cur = await callTool("scene_get_current");
+    const curName = cur.sceneName || cur.data?.sceneName || "";
+    const isSaved = !["scene-2d", "scene-3d", "Untitled", "NewScene", ""].includes(curName);
+    if (!isSaved) {
+        // setup が正しく機能していれば到達しないはず
+        console.log(`  ⚠️  current scene "${curName}" is untitled, skipping (setup issue?)`);
+        if (tempNodeUuid) await callTool("node_delete", { uuid: tempNodeUuid });
+        return;
+    }
+
+    // 3. 別シーン (MainScene) に切替 — 保存済みシーンなので preflight が auto-save して成功するはず
+    const mainInfo = await callTool("asset_query_uuid", { path: "db://assets/MainScene.scene" });
+    const mainUuid = mainInfo.uuid || mainInfo.data?.uuid;
+    if (!mainUuid) {
+        skip("dialog prevention: MainScene not found");
+        if (tempNodeUuid) await callTool("node_delete", { uuid: tempNodeUuid });
+        return;
+    }
+
+    const switchResult = await callTool("scene_open", { scene: mainUuid });
+    assert(switchResult.success === true,
+        `saved dirty → scene_open auto-saves and switches (got: ${JSON.stringify(switchResult).slice(0, 120)})`);
+
+    // 4. スイッチが完了するまで待機
+    const SWITCH_TIMEOUT_MS = 5000;
+    const deadline = Date.now() + SWITCH_TIMEOUT_MS;
+    let switchedToMain = false;
+    while (Date.now() < deadline) {
+        const now = await callTool("scene_get_current");
+        if ((now.sceneName || now.data?.sceneName) === "MainScene") {
+            switchedToMain = true;
+            break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    assert(switchedToMain, "scene actually switched to MainScene after preflight auto-save");
+
+    // 5. _regression に戻す
+    const regInfo = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH });
+    const regUuid = regInfo.uuid || regInfo.data?.uuid;
+    if (regUuid) {
+        await callTool("scene_open", { scene: regUuid });
+        // settle
+        const deadline2 = Date.now() + SWITCH_TIMEOUT_MS;
+        while (Date.now() < deadline2) {
+            const now = await callTool("scene_get_current");
+            if ((now.sceneName || now.data?.sceneName) === "_regression") break;
+            await new Promise((r) => setTimeout(r, 200));
+        }
+    }
+
+    // クリーンアップ: 元の temp node は auto-save で _regression.scene に保存されてしまっているので、
+    // 新規 load 後は uuid が変わっている。名前ベースで削除を試みる。
+    const finalHier = await callTool("scene_get_hierarchy");
+    const canvas = finalHier.hierarchy?.find((x) => x.name === "Canvas");
+    const leftover = canvas?.children?.find((c) => c.name?.startsWith("DialogGuardTest_"));
+    if (leftover?.uuid) {
+        await callTool("node_delete", { uuid: leftover.uuid });
     }
 }
 
@@ -854,10 +967,19 @@ async function cleanupOrphanNodes() {
         return;
     }
     const targets = [];
+    const ORPHAN_PATTERNS = [
+        /^TestNode_\d+$/,
+        /^DialogGuardTest_\d+$/,
+        /^GuardTest$/,
+        /^UpdateTestNode$/,
+        /^ReplaceTest$/,
+        /^AliasTest$/,
+        /^ChildTest$/,
+    ];
     const walk = (nodes) => {
         if (!Array.isArray(nodes)) return;
         for (const n of nodes) {
-            if (n.name === "(Missing Node)" || /^TestNode_\d+$/.test(n.name)) {
+            if (n.name === "(Missing Node)" || ORPHAN_PATTERNS.some((re) => re.test(n.name))) {
                 targets.push(n.uuid);
             }
             if (n.children) walk(n.children);
@@ -878,6 +1000,357 @@ async function cleanupOrphanNodes() {
     passed++;
 }
 
+// ── OAuth dummy endpoints (v1.11.0 — Claude Code VSCode HTTP OAuth bug 回避用) ──
+
+async function testOAuthEndpoints() {
+    console.log("\n── OAuth dummy endpoints ──");
+
+    // RFC 9728 Protected Resource Metadata
+    {
+        const res = await fetch(`${BASE}/.well-known/oauth-protected-resource`);
+        assert(res.status === 200, "protected-resource status 200");
+        const data = await res.json();
+        assert(data.resource === `${BASE}/mcp`, `resource: ${data.resource}`);
+        assert(Array.isArray(data.authorization_servers) && data.authorization_servers.length > 0,
+            "authorization_servers non-empty");
+        assert(Array.isArray(data.bearer_methods_supported) && data.bearer_methods_supported.includes("header"),
+            "bearer_methods_supported includes header");
+    }
+
+    // RFC 8414 Authorization Server Metadata
+    {
+        const res = await fetch(`${BASE}/.well-known/oauth-authorization-server`);
+        assert(res.status === 200, "authorization-server status 200");
+        const data = await res.json();
+        assert(data.issuer === BASE, `issuer: ${data.issuer}`);
+        assert(data.authorization_endpoint === `${BASE}/oauth/authorize`,
+            `authorization_endpoint: ${data.authorization_endpoint}`);
+        assert(data.token_endpoint === `${BASE}/oauth/token`,
+            `token_endpoint: ${data.token_endpoint}`);
+        assert(data.registration_endpoint === `${BASE}/oauth/register`,
+            `registration_endpoint: ${data.registration_endpoint}`);
+        assert(Array.isArray(data.grant_types_supported) && data.grant_types_supported.includes("authorization_code"),
+            "grant_types_supported includes authorization_code");
+        assert(Array.isArray(data.code_challenge_methods_supported) && data.code_challenge_methods_supported.includes("S256"),
+            "code_challenge_methods_supported includes S256");
+    }
+
+    // RFC 7591 Dynamic Client Registration
+    {
+        const res = await fetch(`${BASE}/oauth/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                client_name: "regression-test",
+                redirect_uris: ["http://localhost:54321/callback"],
+            }),
+        });
+        assert(res.status === 200, "register status 200");
+        const data = await res.json();
+        assert(typeof data.client_id === "string" && data.client_id.length > 0,
+            `client_id: ${data.client_id}`);
+        assert(data.token_endpoint_auth_method === "none",
+            "token_endpoint_auth_method: none");
+        assert(Array.isArray(data.redirect_uris) && data.redirect_uris[0] === "http://localhost:54321/callback",
+            "redirect_uris echoed");
+    }
+
+    // Authorization endpoint — expect 302 with code and state
+    {
+        const redirectUri = "http://localhost:54321/cb";
+        const state = "test-state-xyz";
+        const qs = new URLSearchParams({
+            response_type: "code",
+            client_id: "regtest",
+            redirect_uri: redirectUri,
+            state,
+            code_challenge: "dummy",
+            code_challenge_method: "S256",
+        });
+        const res = await fetch(`${BASE}/oauth/authorize?${qs}`, { redirect: "manual" });
+        assert(res.status === 302, `authorize status 302 (got ${res.status})`);
+        const location = res.headers.get("location") || "";
+        assert(location.startsWith(redirectUri), `redirect back to redirect_uri: ${location}`);
+        assert(/[?&]code=[^&]+/.test(location), "code param present");
+        assert(location.includes(`state=${encodeURIComponent(state)}`), "state param preserved");
+    }
+
+    // Authorization endpoint — missing redirect_uri should 400
+    {
+        const res = await fetch(`${BASE}/oauth/authorize?response_type=code&client_id=x`, { redirect: "manual" });
+        assert(res.status === 400, `authorize without redirect_uri → 400 (got ${res.status})`);
+    }
+
+    // Token endpoint
+    {
+        const res = await fetch(`${BASE}/oauth/token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "grant_type=authorization_code&code=abc&redirect_uri=http%3A%2F%2Flocalhost%3A54321%2Fcb",
+        });
+        assert(res.status === 200, "token status 200");
+        const data = await res.json();
+        assert(typeof data.access_token === "string" && data.access_token.length > 0,
+            `access_token: ${data.access_token}`);
+        assert(data.token_type === "Bearer", `token_type: ${data.token_type}`);
+        assert(typeof data.expires_in === "number" && data.expires_in > 0,
+            `expires_in: ${data.expires_in}`);
+    }
+
+    // 既存 /mcp エンドポイントが Authorization ヘッダーなしでも従来通り処理されること
+    {
+        const res = await fetch(`${BASE}/mcp`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 9999, method: "initialize", params: {} }),
+        });
+        assert(res.status === 200, "/mcp without auth still 200 (no regression)");
+        const data = await res.json();
+        assert(data.result?.serverInfo?.name === "cocos-creator-mcp",
+            "/mcp without auth returns initialize result");
+    }
+}
+
+// ── stdio bridge (client/stdio-bridge.js) ──
+
+function runStdioBridge(requests) {
+    return new Promise((resolve, reject) => {
+        const bridgePath = path.resolve(__dirname, "..", "client", "stdio-bridge.js");
+        const child = spawn("node", [bridgePath], {
+            stdio: ["pipe", "pipe", "pipe"],
+            env: { ...process.env, COCOS_MCP_URL: `${BASE}/mcp` },
+        });
+
+        const stdoutChunks = [];
+        const stderrChunks = [];
+        child.stdout.on("data", (c) => stdoutChunks.push(c));
+        child.stderr.on("data", (c) => stderrChunks.push(c));
+
+        child.on("error", (e) => reject(e));
+        child.on("close", (code) => {
+            const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+            const stderr = Buffer.concat(stderrChunks).toString("utf8");
+            const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
+            const responses = [];
+            for (const line of lines) {
+                try { responses.push(JSON.parse(line)); }
+                catch { /* skip non-JSON */ }
+            }
+            resolve({ code, responses, stderr });
+        });
+
+        for (const req of requests) {
+            child.stdin.write(JSON.stringify(req) + "\n");
+        }
+        child.stdin.end();
+    });
+}
+
+async function testStdioBridge() {
+    console.log("\n── stdio bridge (client/stdio-bridge.js) ──");
+
+    // 1. initialize + tools/list — 基本動作
+    {
+        const { code, responses, stderr } = await runStdioBridge([
+            { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {} } },
+            { jsonrpc: "2.0", id: 2, method: "tools/list" },
+        ]);
+        assert(code === 0, `bridge exit code 0 (got ${code})`);
+        assert(responses.length === 2, `bridge returned 2 responses (got ${responses.length})`);
+        const init = responses.find((r) => r.id === 1);
+        assert(init?.result?.serverInfo?.name === "cocos-creator-mcp",
+            "bridge: initialize result");
+        const toolsList = responses.find((r) => r.id === 2);
+        const tools = toolsList?.result?.tools || [];
+        assert(tools.length >= 148, `bridge: tools/list count >= 148 (got ${tools.length})`);
+        assert(stderr.includes("session established"),
+            "bridge: session established logged");
+    }
+
+    // 2. tools/call を通した実ツール呼び出し
+    {
+        const { responses } = await runStdioBridge([
+            { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+            { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "scene_get_current", arguments: {} } },
+        ]);
+        const toolRes = responses.find((r) => r.id === 2);
+        assert(!!toolRes?.result, "bridge: tools/call returned result");
+        const content = toolRes?.result?.content?.[0]?.text;
+        const parsed = content ? JSON.parse(content) : null;
+        assert(parsed?.success === true, "bridge: scene_get_current success");
+    }
+
+    // 3. 不正 JSON を流したとき parse error を返す
+    {
+        const { responses } = await new Promise((resolve, reject) => {
+            const bridgePath = path.resolve(__dirname, "..", "client", "stdio-bridge.js");
+            const child = spawn("node", [bridgePath], {
+                stdio: ["pipe", "pipe", "pipe"],
+                env: { ...process.env, COCOS_MCP_URL: `${BASE}/mcp` },
+            });
+            const out = [];
+            child.stdout.on("data", (c) => out.push(c));
+            child.on("close", () => {
+                const lines = Buffer.concat(out).toString("utf8").split("\n").filter(Boolean);
+                const parsed = [];
+                for (const l of lines) try { parsed.push(JSON.parse(l)); } catch {}
+                resolve({ responses: parsed });
+            });
+            child.on("error", reject);
+            child.stdin.write("this is not json\n");
+            child.stdin.end();
+        });
+        const err = responses[0];
+        assert(err?.error?.code === -32700, `bridge: parse error code -32700 (got ${err?.error?.code})`);
+    }
+
+    // 4. COCOS_MCP_URL 環境変数で向き先を上書きできる（到達不能 URL でエラーが返る）
+    {
+        const bridgePath = path.resolve(__dirname, "..", "client", "stdio-bridge.js");
+        const { responses } = await new Promise((resolve, reject) => {
+            const child = spawn("node", [bridgePath], {
+                stdio: ["pipe", "pipe", "pipe"],
+                env: { ...process.env, COCOS_MCP_URL: "http://127.0.0.1:9/mcp" }, // discard port
+            });
+            const out = [];
+            child.stdout.on("data", (c) => out.push(c));
+            child.on("close", () => {
+                const lines = Buffer.concat(out).toString("utf8").split("\n").filter(Boolean);
+                const parsed = [];
+                for (const l of lines) try { parsed.push(JSON.parse(l)); } catch {}
+                resolve({ responses: parsed });
+            });
+            child.on("error", reject);
+            child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
+            child.stdin.end();
+        });
+        const err = responses[0];
+        assert(err?.error?.code === -32603, `bridge: HTTP error → -32603 (got ${err?.error?.code})`);
+    }
+}
+
+// ── test scene setup ──
+
+/**
+ * 回帰テスト専用シーンを用意して開く。
+ *
+ * - CC 直後（現在シーンが untitled かつ clean）ならここから scene_open を呼んで遷移
+ * - 既に untitled dirty 状態なら abort
+ * - 既に _regression.scene 上なら何もしない
+ *
+ * 目的: テスト中に scene_create / scene_open / prefab_create 等で dirty state が
+ * CC 標準の「Save changes?」ダイアログを出す問題を回避するため、保存済みシーンに移動する。
+ */
+const TEST_SCENE_PATH = "db://assets/test/_regression.scene";
+const SOURCE_SCENE_PATH = "db://assets/MainScene.scene"; // クローン元のテンプレート
+
+async function ensureCleanTestScene() {
+    console.log("\n── setup: ensure clean test scene ──");
+
+    const cur = await callTool("scene_get_current");
+    const curName = cur.sceneName || cur.data?.sceneName || "";
+    const isUntitled = ["scene-2d", "scene-3d", "Untitled", "NewScene", ""].includes(curName);
+
+    // 既にテスト用シーン上ならそのまま
+    if (curName === "_regression") {
+        console.log(`  ✅ already on _regression.scene`);
+        passed++;
+        return true;
+    }
+
+    // untitled シーン上の場合: dirty flag が立っていると scene_open で CC 標準の
+    // 「Save changes?」ダイアログが出て MCP が固まる。ノードを削除しても CC の dirty
+    // 履歴は消えないので、この状態では CC 再起動以外に回復手段がない。素直に abort する。
+    if (isUntitled) {
+        const dirtyCheck = await callTool("scene_query_dirty");
+        const isDirty = dirtyCheck.dirty === true || dirtyCheck.data?.dirty === true;
+        if (isDirty) {
+            console.error(
+                `\n❌ Cannot start regression test: current scene "${curName}" is untitled ` +
+                `and has been modified (dirty flag set). CC cannot save an untitled scene ` +
+                `without a modal dialog, and deleting leftover nodes does not clear the dirty ` +
+                `flag.\n   Please restart CocosCreator and run the test again.\n`
+            );
+            failed++;
+            return false;
+        }
+    }
+
+    // _regression.scene の準備:
+    // scene_create の asset-db fallback が生成する最小 JSON は CC が拒否するため、
+    // 既存の MainScene.scene を asset_copy で複製する方式にしている。
+    let info = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH }).catch(() => ({}));
+    let sceneUuid = info.uuid || info.data?.uuid;
+
+    if (!sceneUuid) {
+        console.log(`  cloning ${SOURCE_SCENE_PATH} → ${TEST_SCENE_PATH}...`);
+
+        // ソースの存在確認
+        const srcInfo = await callTool("asset_query_uuid", { path: SOURCE_SCENE_PATH }).catch(() => ({}));
+        const srcUuid = srcInfo.uuid || srcInfo.data?.uuid;
+        if (!srcUuid) {
+            console.error(`  ❌ source scene ${SOURCE_SCENE_PATH} not found; cannot create test scene`);
+            failed++;
+            return false;
+        }
+
+        const copied = await callTool("asset_copy", { source: SOURCE_SCENE_PATH, destination: TEST_SCENE_PATH });
+        if (!copied.success) {
+            console.error(`  ❌ failed to copy test scene: ${JSON.stringify(copied).slice(0, 200)}`);
+            failed++;
+            return false;
+        }
+
+        info = await callTool("asset_query_uuid", { path: TEST_SCENE_PATH }).catch(() => ({}));
+        sceneUuid = info.uuid || info.data?.uuid;
+    }
+
+    if (!sceneUuid) {
+        console.error(`  ❌ could not resolve UUID for ${TEST_SCENE_PATH}`);
+        failed++;
+        return false;
+    }
+
+    // scene_open は非同期ロードで response success が実際の切替完了を保証しない。
+    // 切替が観測できるまで scene_open + scene_get_current の polling を繰り返す。
+    // ここまで来ている時点で current scene は clean が保証されているので force は不要。
+    const SWITCH_TIMEOUT_MS = 15000;
+    const POLL_INTERVAL_MS = 300;
+    const deadline = Date.now() + SWITCH_TIMEOUT_MS;
+    let switched = false;
+    let lastError = "";
+    let openAttempts = 0;
+
+    while (Date.now() < deadline) {
+        const now = await callTool("scene_get_current");
+        const name = now.sceneName || now.data?.sceneName || "";
+        if (name === "_regression") {
+            switched = true;
+            break;
+        }
+        // 切替されていなければ scene_open を再試行（idempotent）
+        openAttempts++;
+        const opened = await callTool("scene_open", { scene: sceneUuid });
+        if (opened.success !== true) {
+            lastError = JSON.stringify(opened).slice(0, 200);
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+
+    if (!switched) {
+        console.error(
+            `  ❌ scene_open did not switch to _regression within ${SWITCH_TIMEOUT_MS}ms ` +
+            `(attempts: ${openAttempts}, last error: ${lastError || "none"})`
+        );
+        failed++;
+        return false;
+    }
+
+    console.log(`  ✅ opened and verified ${TEST_SCENE_PATH} (${openAttempts} open attempt(s))`);
+    passed++;
+    return true;
+}
+
 // ── runner ──
 
 async function main() {
@@ -894,6 +1367,18 @@ async function main() {
     await testHealth();
     await testInitialize();
     await testToolsList();
+    await testOAuthEndpoints();
+    await testStdioBridge();
+
+    // scene 依存テストの前にテスト専用シーンを用意
+    const sceneReady = await ensureCleanTestScene();
+    if (!sceneReady) {
+        console.log(`\n${"═".repeat(40)}`);
+        console.log(`  Setup failed — aborting scene-dependent tests.`);
+        console.log(`  Results: ${passed} passed, ${failed} failed, ${skipped} skipped`);
+        console.log(`${"═".repeat(40)}\n`);
+        process.exit(1);
+    }
     await testSceneTools();
     await testNodeCrud();
     await testComponentTools();
@@ -918,6 +1403,7 @@ async function main() {
     await testV18NewTools();
     await testStringifiedArgs();
     await testSceneCreate();
+    await testDialogPrevention();
     await testUncoveredTools();
     await cleanupOrphanNodes();
 

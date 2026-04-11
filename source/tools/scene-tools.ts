@@ -3,6 +3,126 @@ import { ok, err } from "../tool-base";
 
 const EXT_NAME = "cocos-creator-mcp";
 
+/** シーン名から「untitled (保存先なし)」かどうかを判定 */
+const UNTITLED_SCENE_NAMES = new Set(["scene-2d", "scene-3d", "Untitled", "NewScene", ""]);
+
+/**
+ * 現在のシーンの dirty 状態を取得。
+ * CC バージョンによって query-dirty / query-is-dirty のどちらか（または両方）が存在するので両方試行。
+ */
+export async function queryCurrentSceneDirty(): Promise<boolean> {
+    try {
+        const r = await (Editor.Message.request as any)("scene", "query-dirty");
+        return !!r;
+    } catch { /* try alternate */ }
+    try {
+        const r = await (Editor.Message.request as any)("scene", "query-is-dirty");
+        return !!r;
+    } catch { /* assume clean if both fail */ }
+    return false;
+}
+
+/**
+ * 現在のシーン情報（名前・UUID）を取得。
+ */
+export async function queryCurrentSceneInfo(): Promise<{ sceneName: string; sceneUuid: string }> {
+    try {
+        const result: any = await Editor.Message.request(
+            "scene",
+            "execute-scene-script",
+            { name: EXT_NAME, method: "getSceneHierarchy", args: [false] }
+        );
+        return { sceneName: result?.sceneName || "", sceneUuid: result?.sceneUuid || "" };
+    } catch {
+        return { sceneName: "", sceneUuid: "" };
+    }
+}
+
+/**
+ * 現在のシーンが untitled (scene-2d 等) かを判定。
+ */
+export async function isCurrentSceneUntitled(): Promise<boolean> {
+    const { sceneName } = await queryCurrentSceneInfo();
+    return UNTITLED_SCENE_NAMES.has(sceneName);
+}
+
+/**
+ * save-scene をダイアログ安全に呼び出す。
+ *
+ * - 現在のシーンが untitled (scene-2d 等) → no-op（ダイアログ防止）
+ * - それ以外 → save-scene を実行
+ *
+ * 任意の MCP ツール内部で save-scene を呼ぶ場合は必ずこれ経由にする。
+ * 直接 `Editor.Message.request("scene", "save-scene")` を呼ぶと、
+ * 現在シーンが untitled のときにモーダルダイアログが出て MCP が固まる。
+ *
+ * @returns 実際に保存を実行したか
+ */
+export async function safeSaveScene(): Promise<boolean> {
+    if (await isCurrentSceneUntitled()) {
+        console.warn(
+            "[cocos-creator-mcp] safeSaveScene: current scene is untitled, " +
+            "skipping save-scene to avoid modal dialog."
+        );
+        return false;
+    }
+    await (Editor.Message.request as any)("scene", "save-scene");
+    return true;
+}
+
+/**
+ * シーン切替系ツール（scene_open/close/new など）の前処理。
+ *
+ * - clean → OK
+ * - dirty + 保存先ありのシーン → save-scene で自動保存
+ * - dirty + untitled シーン → force=false なら明示エラー、force=true なら警告ログして続行
+ *
+ * 目的: "Save changes?" ダイアログで MCP がブロックされるのを防ぐ。
+ * force=true は「ダイアログが出ないことをユーザーが知っている or 出ても構わない」ケース用。
+ *
+ * @throws Error force=false かつ dirty + untitled のとき
+ */
+export async function ensureSceneSafeToSwitch(force: boolean = false): Promise<void> {
+    const isDirty = await queryCurrentSceneDirty();
+    if (!isDirty) return;
+
+    const { sceneName } = await queryCurrentSceneInfo();
+    const isUntitled = UNTITLED_SCENE_NAMES.has(sceneName);
+
+    if (isUntitled) {
+        if (force) {
+            console.warn(
+                `[cocos-creator-mcp] ensureSceneSafeToSwitch: untitled scene "${sceneName}" ` +
+                `is dirty but force=true — proceeding (modal dialog may appear).`
+            );
+            return;
+        }
+        throw new Error(
+            `Cannot switch scenes: current scene "${sceneName || "(unnamed)"}" is untitled ` +
+            `and has unsaved changes. Switching would trigger a modal "Save changes?" dialog ` +
+            `that blocks the MCP server. Save the current scene first ` +
+            `(File > Save Scene As, or scene_save on a named scene), or pass force=true to bypass.`
+        );
+    }
+
+    try {
+        // ここに来る時点で untitled ではない（上で判定済み）ので直接 save-scene OK
+        await (Editor.Message.request as any)("scene", "save-scene");
+    } catch (e: any) {
+        if (force) {
+            console.warn(
+                `[cocos-creator-mcp] ensureSceneSafeToSwitch: save-scene failed but force=true — proceeding. ` +
+                `Error: ${e.message || e}`
+            );
+            return;
+        }
+        throw new Error(
+            `Failed to auto-save dirty scene "${sceneName}" before switch: ${e.message || e}. ` +
+            `Save manually and retry, or pass force=true to bypass.`
+        );
+    }
+}
+
 export class SceneTools implements ToolCategory {
     readonly categoryName = "scene";
 
@@ -23,13 +143,17 @@ export class SceneTools implements ToolCategory {
             },
             {
                 name: "scene_open",
-                description: "Open a scene by its asset UUID or database path (e.g. 'db://assets/scenes/Main.scene').",
+                description: "Open a scene by its asset UUID or database path (e.g. 'db://assets/scenes/Main.scene'). If the current scene is dirty and untitled, returns an error instead of triggering a modal save dialog that would block MCP. Pass force=true to bypass this guard.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         scene: {
                             type: "string",
                             description: "Scene UUID or db:// path",
+                        },
+                        force: {
+                            type: "boolean",
+                            description: "Skip dirty-scene preflight check (may trigger modal save dialog)",
                         },
                     },
                     required: ["scene"],
@@ -53,8 +177,16 @@ export class SceneTools implements ToolCategory {
             },
             {
                 name: "scene_close",
-                description: "Close the current scene.",
-                inputSchema: { type: "object", properties: {} },
+                description: "Close the current scene. If the current scene is dirty and untitled, returns an error instead of triggering a modal save dialog. Pass force=true to bypass.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        force: {
+                            type: "boolean",
+                            description: "Skip dirty-scene preflight check (may trigger modal save dialog)",
+                        },
+                    },
+                },
             },
             {
                 name: "scene_get_current",
@@ -69,13 +201,14 @@ export class SceneTools implements ToolCategory {
             case "scene_get_hierarchy":
                 return this.getHierarchy(args.includeComponents ?? false);
             case "scene_open":
-                return this.openScene(args.scene);
+                return this.openScene(args.scene, !!args.force);
             case "scene_save":
                 return this.saveScene();
             case "scene_get_list":
                 return this.getSceneList();
             case "scene_close":
                 try {
+                    await ensureSceneSafeToSwitch(!!args.force);
                     await (Editor.Message.request as any)("scene", "close-scene");
                     return ok({ success: true });
                 } catch (e: any) { return err(e.message || String(e)); }
@@ -112,8 +245,9 @@ export class SceneTools implements ToolCategory {
         }
     }
 
-    private async openScene(scene: string): Promise<ToolResult> {
+    private async openScene(scene: string, force: boolean): Promise<ToolResult> {
         try {
+            await ensureSceneSafeToSwitch(force);
             await Editor.Message.request("asset-db", "open-asset", scene);
             return ok({ success: true, scene });
         } catch (e: any) {

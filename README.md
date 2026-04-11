@@ -53,7 +53,40 @@ npm run build
 
 ### 4. Connect from Claude Code
 
-Add to your project's `.mcp.json`:
+Pick one of the two transports below.
+
+#### Option A — stdio bridge (recommended for Claude Code VSCode extension)
+
+The Claude Code VSCode extension currently has a bug where it unconditionally
+tries OAuth Dynamic Client Registration for HTTP-type MCP servers and fails
+with `SDK auth failed` (see upstream issues
+[#26917](https://github.com/anthropics/claude-code/issues/26917),
+[#38102](https://github.com/anthropics/claude-code/issues/38102),
+[#29697](https://github.com/anthropics/claude-code/issues/29697)).
+To avoid it entirely, use the bundled stdio bridge. It speaks JSON-RPC on
+stdin/stdout and forwards to the HTTP server internally.
+
+```json
+{
+  "mcpServers": {
+    "cocos-creator-mcp": {
+      "command": "node",
+      "args": [
+        "<ABSOLUTE_PATH_TO>/cocos-creator-mcp/client/stdio-bridge.js"
+      ]
+    }
+  }
+}
+```
+
+Optional env var: `COCOS_MCP_URL` (default `http://127.0.0.1:3000/mcp`).
+
+#### Option B — direct HTTP
+
+Works with Claude Code CLI, Cursor, Cline, and other clients that don't force
+OAuth on HTTP MCP. The server ships minimal dummy OAuth endpoints
+(`/.well-known/oauth-*`, `/oauth/register|authorize|token`) so OAuth-requiring
+clients can still complete a pro-forma flow on localhost.
 
 ```json
 {
@@ -65,6 +98,11 @@ Add to your project's `.mcp.json`:
   }
 }
 ```
+
+> The dummy OAuth endpoints will be removed once upstream issues
+> ([#26917](https://github.com/anthropics/claude-code/issues/26917),
+> [#38102](https://github.com/anthropics/claude-code/issues/38102))
+> are resolved or real authentication is introduced.
 
 ### 5. Verify
 
@@ -457,6 +495,9 @@ node test/regression.mjs 3001    # custom port
 - **v1.8.0** — Preview Recorder panel: `debug_record_start` / `debug_record_stop` (MediaRecorder via canvas.captureStream, MP4/WebM, quality presets)
 - **v1.8.1** — Fix: `component_set_property` cc.Asset references (cc.Font etc.) falling back to cc.Node when type is unspecified
 - **v1.8.2** — Preview Recorder: screenshot button (webp/png toggle, max width), section-based UI layout
+- **v1.9.0** — Preview Recorder auto-archive of old recordings + preflight "preview not running" check
+- **v1.10.0** — `scene_create` asset-db fallback, stringified args preventive validation, test coverage expansion
+- **v1.11.0** — HTTP MCP OAuth workaround (stdio bridge + dummy OAuth endpoints for Claude Code VSCode upstream bug) + dialog prevention for scene switching tools (`force` param, `ensureSceneSafeToSwitch`, `safeSaveScene`) + regression tests for both
 
 ## Development
 

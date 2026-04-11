@@ -2,6 +2,7 @@ import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
 import { getGameLogs, clearGameLogs, queueGameCommand, getCommandResult } from "../mcp-server";
 import { parseMaybeJson } from "../utils";
+import { ensureSceneSafeToSwitch } from "./scene-tools";
 
 export class DebugTools implements ToolCategory {
     readonly categoryName = "debug";
@@ -550,6 +551,9 @@ export class DebugTools implements ToolCategory {
             }
 
             if (sceneUuid) {
+                // debug_preview 内部の自動遷移は preview を優先して force=true
+                // （dialog 出るより preview 開始を優先する運用）
+                await ensureSceneSafeToSwitch(true);
                 await (Editor.Message.request as any)("scene", "open-scene", sceneUuid);
                 await new Promise(r => setTimeout(r, 1500));
             }

@@ -1,5 +1,6 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
+import { ensureSceneSafeToSwitch } from "./scene-tools";
 
 const EXT_NAME = "cocos-creator-mcp";
 
@@ -102,11 +103,12 @@ export class SceneAdvancedTools implements ToolCategory {
             },
             {
                 name: "scene_create",
-                description: "Create a new empty 2D scene. If path is omitted, uses the editor's built-in new-scene command (may not work on CC 3.8.x). If path is specified, creates a .scene file via asset-db as a fallback.",
+                description: "Create a new empty 2D scene. If path is omitted, uses the editor's built-in new-scene command (may not work on CC 3.8.x). If path is specified, creates a .scene file via asset-db as a fallback. Returns an error if the current scene is dirty and untitled (to avoid modal save dialog); pass force=true to bypass.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         path: { type: "string", description: "Scene asset path (e.g. 'db://assets/scenes/NewScene.scene'). If omitted, uses editor's new-scene command." },
+                        force: { type: "boolean", description: "Skip dirty-scene preflight check (may trigger modal save dialog)" },
                     },
                 },
             },
@@ -308,7 +310,7 @@ export class SceneAdvancedTools implements ToolCategory {
                     return ok({ success: true, result });
                 }
                 case "scene_create":
-                    return this.createScene(args.path);
+                    return this.createScene(args.path, !!args.force);
                 case "scene_cut_node":
                     await (Editor.Message.request as any)("scene", "cut-node", args.uuid);
                     return ok({ success: true, uuid: args.uuid });
@@ -389,7 +391,11 @@ export class SceneAdvancedTools implements ToolCategory {
         return ok({ success: true, uuid });
     }
 
-    private async createScene(path?: string): Promise<ToolResult> {
+    private async createScene(path?: string, force: boolean = false): Promise<ToolResult> {
+        // ダイアログ割り込み防止: 現在シーンが dirty かつ untitled の場合は事前エラー
+        try { await ensureSceneSafeToSwitch(force); }
+        catch (e: any) { return err(e.message || String(e)); }
+
         // まず scene:new-scene を試行（path 未指定時のみ）
         if (!path) {
             try {
@@ -439,6 +445,7 @@ export class SceneAdvancedTools implements ToolCategory {
 
             // シーンを開く
             try {
+                // ensureSceneSafeToSwitch は createScene 入口で既に通過済みなのでここでは再チェックしない
                 const queryResult = await (Editor.Message.request as any)("asset-db", "query-uuid", path);
                 if (queryResult) {
                     await (Editor.Message.request as any)("scene", "open-scene", queryResult);
