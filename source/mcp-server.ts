@@ -174,6 +174,95 @@ export class McpServer {
         }
 
         const url = req.url || "/";
+        const origin = `http://127.0.0.1:${this.config.port}`;
+
+        // ─── OAuth endpoints (MCP spec 2025-06-18 / RFC 9728 / RFC 8414 / RFC 7591) ───
+        //
+        // Claude Code の VSCode 拡張は HTTP トランスポートの MCP サーバーに対して
+        // 無条件で OAuth discovery / DCR を試みる (#26917 等の既知バグ)。
+        // cocos-creator-mcp は localhost-only のローカル開発ツールで本物の認証は不要だが、
+        // クライアントを満足させるため OAuth エンドポイント群をダミー実装して常時許可する。
+
+        // RFC 9728 Protected Resource Metadata
+        if (url === "/.well-known/oauth-protected-resource" && req.method === "GET") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                resource: `${origin}/mcp`,
+                authorization_servers: [origin],
+                bearer_methods_supported: ["header"],
+                scopes_supported: ["mcp"],
+            }));
+            return;
+        }
+
+        // RFC 8414 Authorization Server Metadata
+        if (url === "/.well-known/oauth-authorization-server" && req.method === "GET") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                issuer: origin,
+                authorization_endpoint: `${origin}/oauth/authorize`,
+                token_endpoint: `${origin}/oauth/token`,
+                registration_endpoint: `${origin}/oauth/register`,
+                response_types_supported: ["code"],
+                grant_types_supported: ["authorization_code"],
+                code_challenge_methods_supported: ["S256", "plain"],
+                token_endpoint_auth_methods_supported: ["none"],
+                scopes_supported: ["mcp"],
+            }));
+            return;
+        }
+
+        // RFC 7591 Dynamic Client Registration — accept anything, return dummy client
+        if (url === "/oauth/register" && req.method === "POST") {
+            const body = await readBody(req);
+            let reg: any = {};
+            try { reg = JSON.parse(body); } catch { /* ignore */ }
+            const clientId = `cocos-mcp-client-${Date.now()}`;
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                client_id: clientId,
+                client_id_issued_at: Math.floor(Date.now() / 1000),
+                client_name: reg.client_name || "cocos-creator-mcp client",
+                redirect_uris: reg.redirect_uris || [],
+                token_endpoint_auth_method: "none",
+                grant_types: ["authorization_code"],
+                response_types: ["code"],
+            }));
+            return;
+        }
+
+        // OAuth authorization endpoint — auto-consent, redirect immediately with code
+        if (url.startsWith("/oauth/authorize") && req.method === "GET") {
+            const parsed = new URL(url, origin);
+            const redirectUri = parsed.searchParams.get("redirect_uri") || "";
+            const state = parsed.searchParams.get("state") || "";
+            if (!redirectUri) {
+                res.writeHead(400, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "invalid_request", error_description: "redirect_uri required" }));
+                return;
+            }
+            const code = `cocos-mcp-code-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            const location = `${redirectUri}${redirectUri.includes("?") ? "&" : "?"}code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+            res.writeHead(302, { Location: location });
+            res.end();
+            return;
+        }
+
+        // OAuth token endpoint — always issue a dummy token
+        if (url === "/oauth/token" && req.method === "POST") {
+            await readBody(req); // drain
+            res.writeHead(200, {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-store",
+            });
+            res.end(JSON.stringify({
+                access_token: "cocos-mcp-public-token",
+                token_type: "Bearer",
+                expires_in: 86400,
+                scope: "mcp",
+            }));
+            return;
+        }
 
         // Health check
         if (url === "/health" && req.method === "GET") {

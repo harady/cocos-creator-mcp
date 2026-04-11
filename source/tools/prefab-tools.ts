@@ -239,7 +239,8 @@ export class PrefabTools implements ToolCategory {
                 assetUuid: prefabUuid,
             });
 
-            // ネスト Prefab 情報を記憶（prefab_update 時に JSON 後処理で使用）
+            // Prefab 編集モード中の場合、ネスト Prefab 情報を記憶
+            // prefab_update 時に JSON 後処理で asset/instance/nestedPrefabInstanceRoots を設定
             if (parent) {
                 this._pendingNestedPrefabs.push({
                     nodeUuid,
