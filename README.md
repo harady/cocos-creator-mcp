@@ -495,6 +495,9 @@ node test/regression.mjs 3001    # custom port
 - **v1.8.0** — Preview Recorder panel: `debug_record_start` / `debug_record_stop` (MediaRecorder via canvas.captureStream, MP4/WebM, quality presets)
 - **v1.8.1** — Fix: `component_set_property` cc.Asset references (cc.Font etc.) falling back to cc.Node when type is unspecified
 - **v1.8.2** — Preview Recorder: screenshot button (webp/png toggle, max width), section-based UI layout
+- **v1.9.0** — Preview Recorder auto-archive of old recordings + preflight "preview not running" check
+- **v1.10.0** — `scene_create` asset-db fallback, stringified args preventive validation, test coverage expansion
+- **v1.11.0** — HTTP MCP OAuth workaround (stdio bridge + dummy OAuth endpoints for Claude Code VSCode upstream bug) + dialog prevention for scene switching tools (`force` param, `ensureSceneSafeToSwitch`, `safeSaveScene`) + regression tests for both
 
 ## Development
 
