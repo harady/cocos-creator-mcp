@@ -99,6 +99,11 @@ clients can still complete a pro-forma flow on localhost.
 }
 ```
 
+> The dummy OAuth endpoints will be removed once upstream issues
+> ([#26917](https://github.com/anthropics/claude-code/issues/26917),
+> [#38102](https://github.com/anthropics/claude-code/issues/38102))
+> are resolved or real authentication is introduced.
+
 ### 5. Verify
 
 ```bash

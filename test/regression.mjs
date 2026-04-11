@@ -5,6 +5,13 @@
  * 実行: node test/regression.mjs [port]
  */
 
+import { spawn } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const PORT = process.argv[2] || 3000;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -878,6 +885,235 @@ async function cleanupOrphanNodes() {
     passed++;
 }
 
+// ── OAuth dummy endpoints (v1.11.0 — Claude Code VSCode HTTP OAuth bug 回避用) ──
+
+async function testOAuthEndpoints() {
+    console.log("\n── OAuth dummy endpoints ──");
+
+    // RFC 9728 Protected Resource Metadata
+    {
+        const res = await fetch(`${BASE}/.well-known/oauth-protected-resource`);
+        assert(res.status === 200, "protected-resource status 200");
+        const data = await res.json();
+        assert(data.resource === `${BASE}/mcp`, `resource: ${data.resource}`);
+        assert(Array.isArray(data.authorization_servers) && data.authorization_servers.length > 0,
+            "authorization_servers non-empty");
+        assert(Array.isArray(data.bearer_methods_supported) && data.bearer_methods_supported.includes("header"),
+            "bearer_methods_supported includes header");
+    }
+
+    // RFC 8414 Authorization Server Metadata
+    {
+        const res = await fetch(`${BASE}/.well-known/oauth-authorization-server`);
+        assert(res.status === 200, "authorization-server status 200");
+        const data = await res.json();
+        assert(data.issuer === BASE, `issuer: ${data.issuer}`);
+        assert(data.authorization_endpoint === `${BASE}/oauth/authorize`,
+            `authorization_endpoint: ${data.authorization_endpoint}`);
+        assert(data.token_endpoint === `${BASE}/oauth/token`,
+            `token_endpoint: ${data.token_endpoint}`);
+        assert(data.registration_endpoint === `${BASE}/oauth/register`,
+            `registration_endpoint: ${data.registration_endpoint}`);
+        assert(Array.isArray(data.grant_types_supported) && data.grant_types_supported.includes("authorization_code"),
+            "grant_types_supported includes authorization_code");
+        assert(Array.isArray(data.code_challenge_methods_supported) && data.code_challenge_methods_supported.includes("S256"),
+            "code_challenge_methods_supported includes S256");
+    }
+
+    // RFC 7591 Dynamic Client Registration
+    {
+        const res = await fetch(`${BASE}/oauth/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                client_name: "regression-test",
+                redirect_uris: ["http://localhost:54321/callback"],
+            }),
+        });
+        assert(res.status === 200, "register status 200");
+        const data = await res.json();
+        assert(typeof data.client_id === "string" && data.client_id.length > 0,
+            `client_id: ${data.client_id}`);
+        assert(data.token_endpoint_auth_method === "none",
+            "token_endpoint_auth_method: none");
+        assert(Array.isArray(data.redirect_uris) && data.redirect_uris[0] === "http://localhost:54321/callback",
+            "redirect_uris echoed");
+    }
+
+    // Authorization endpoint — expect 302 with code and state
+    {
+        const redirectUri = "http://localhost:54321/cb";
+        const state = "test-state-xyz";
+        const qs = new URLSearchParams({
+            response_type: "code",
+            client_id: "regtest",
+            redirect_uri: redirectUri,
+            state,
+            code_challenge: "dummy",
+            code_challenge_method: "S256",
+        });
+        const res = await fetch(`${BASE}/oauth/authorize?${qs}`, { redirect: "manual" });
+        assert(res.status === 302, `authorize status 302 (got ${res.status})`);
+        const location = res.headers.get("location") || "";
+        assert(location.startsWith(redirectUri), `redirect back to redirect_uri: ${location}`);
+        assert(/[?&]code=[^&]+/.test(location), "code param present");
+        assert(location.includes(`state=${encodeURIComponent(state)}`), "state param preserved");
+    }
+
+    // Authorization endpoint — missing redirect_uri should 400
+    {
+        const res = await fetch(`${BASE}/oauth/authorize?response_type=code&client_id=x`, { redirect: "manual" });
+        assert(res.status === 400, `authorize without redirect_uri → 400 (got ${res.status})`);
+    }
+
+    // Token endpoint
+    {
+        const res = await fetch(`${BASE}/oauth/token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "grant_type=authorization_code&code=abc&redirect_uri=http%3A%2F%2Flocalhost%3A54321%2Fcb",
+        });
+        assert(res.status === 200, "token status 200");
+        const data = await res.json();
+        assert(typeof data.access_token === "string" && data.access_token.length > 0,
+            `access_token: ${data.access_token}`);
+        assert(data.token_type === "Bearer", `token_type: ${data.token_type}`);
+        assert(typeof data.expires_in === "number" && data.expires_in > 0,
+            `expires_in: ${data.expires_in}`);
+    }
+
+    // 既存 /mcp エンドポイントが Authorization ヘッダーなしでも従来通り処理されること
+    {
+        const res = await fetch(`${BASE}/mcp`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 9999, method: "initialize", params: {} }),
+        });
+        assert(res.status === 200, "/mcp without auth still 200 (no regression)");
+        const data = await res.json();
+        assert(data.result?.serverInfo?.name === "cocos-creator-mcp",
+            "/mcp without auth returns initialize result");
+    }
+}
+
+// ── stdio bridge (client/stdio-bridge.js) ──
+
+function runStdioBridge(requests) {
+    return new Promise((resolve, reject) => {
+        const bridgePath = path.resolve(__dirname, "..", "client", "stdio-bridge.js");
+        const child = spawn("node", [bridgePath], {
+            stdio: ["pipe", "pipe", "pipe"],
+            env: { ...process.env, COCOS_MCP_URL: `${BASE}/mcp` },
+        });
+
+        const stdoutChunks = [];
+        const stderrChunks = [];
+        child.stdout.on("data", (c) => stdoutChunks.push(c));
+        child.stderr.on("data", (c) => stderrChunks.push(c));
+
+        child.on("error", (e) => reject(e));
+        child.on("close", (code) => {
+            const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+            const stderr = Buffer.concat(stderrChunks).toString("utf8");
+            const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
+            const responses = [];
+            for (const line of lines) {
+                try { responses.push(JSON.parse(line)); }
+                catch { /* skip non-JSON */ }
+            }
+            resolve({ code, responses, stderr });
+        });
+
+        for (const req of requests) {
+            child.stdin.write(JSON.stringify(req) + "\n");
+        }
+        child.stdin.end();
+    });
+}
+
+async function testStdioBridge() {
+    console.log("\n── stdio bridge (client/stdio-bridge.js) ──");
+
+    // 1. initialize + tools/list — 基本動作
+    {
+        const { code, responses, stderr } = await runStdioBridge([
+            { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {} } },
+            { jsonrpc: "2.0", id: 2, method: "tools/list" },
+        ]);
+        assert(code === 0, `bridge exit code 0 (got ${code})`);
+        assert(responses.length === 2, `bridge returned 2 responses (got ${responses.length})`);
+        const init = responses.find((r) => r.id === 1);
+        assert(init?.result?.serverInfo?.name === "cocos-creator-mcp",
+            "bridge: initialize result");
+        const toolsList = responses.find((r) => r.id === 2);
+        const tools = toolsList?.result?.tools || [];
+        assert(tools.length >= 148, `bridge: tools/list count >= 148 (got ${tools.length})`);
+        assert(stderr.includes("session established"),
+            "bridge: session established logged");
+    }
+
+    // 2. tools/call を通した実ツール呼び出し
+    {
+        const { responses } = await runStdioBridge([
+            { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+            { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "scene_get_current", arguments: {} } },
+        ]);
+        const toolRes = responses.find((r) => r.id === 2);
+        assert(!!toolRes?.result, "bridge: tools/call returned result");
+        const content = toolRes?.result?.content?.[0]?.text;
+        const parsed = content ? JSON.parse(content) : null;
+        assert(parsed?.success === true, "bridge: scene_get_current success");
+    }
+
+    // 3. 不正 JSON を流したとき parse error を返す
+    {
+        const { responses } = await new Promise((resolve, reject) => {
+            const bridgePath = path.resolve(__dirname, "..", "client", "stdio-bridge.js");
+            const child = spawn("node", [bridgePath], {
+                stdio: ["pipe", "pipe", "pipe"],
+                env: { ...process.env, COCOS_MCP_URL: `${BASE}/mcp` },
+            });
+            const out = [];
+            child.stdout.on("data", (c) => out.push(c));
+            child.on("close", () => {
+                const lines = Buffer.concat(out).toString("utf8").split("\n").filter(Boolean);
+                const parsed = [];
+                for (const l of lines) try { parsed.push(JSON.parse(l)); } catch {}
+                resolve({ responses: parsed });
+            });
+            child.on("error", reject);
+            child.stdin.write("this is not json\n");
+            child.stdin.end();
+        });
+        const err = responses[0];
+        assert(err?.error?.code === -32700, `bridge: parse error code -32700 (got ${err?.error?.code})`);
+    }
+
+    // 4. COCOS_MCP_URL 環境変数で向き先を上書きできる（到達不能 URL でエラーが返る）
+    {
+        const bridgePath = path.resolve(__dirname, "..", "client", "stdio-bridge.js");
+        const { responses } = await new Promise((resolve, reject) => {
+            const child = spawn("node", [bridgePath], {
+                stdio: ["pipe", "pipe", "pipe"],
+                env: { ...process.env, COCOS_MCP_URL: "http://127.0.0.1:9/mcp" }, // discard port
+            });
+            const out = [];
+            child.stdout.on("data", (c) => out.push(c));
+            child.on("close", () => {
+                const lines = Buffer.concat(out).toString("utf8").split("\n").filter(Boolean);
+                const parsed = [];
+                for (const l of lines) try { parsed.push(JSON.parse(l)); } catch {}
+                resolve({ responses: parsed });
+            });
+            child.on("error", reject);
+            child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
+            child.stdin.end();
+        });
+        const err = responses[0];
+        assert(err?.error?.code === -32603, `bridge: HTTP error → -32603 (got ${err?.error?.code})`);
+    }
+}
+
 // ── runner ──
 
 async function main() {
@@ -894,6 +1130,8 @@ async function main() {
     await testHealth();
     await testInitialize();
     await testToolsList();
+    await testOAuthEndpoints();
+    await testStdioBridge();
     await testSceneTools();
     await testNodeCrud();
     await testComponentTools();

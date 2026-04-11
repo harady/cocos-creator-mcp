@@ -182,6 +182,12 @@ export class McpServer {
         // 無条件で OAuth discovery / DCR を試みる (#26917 等の既知バグ)。
         // cocos-creator-mcp は localhost-only のローカル開発ツールで本物の認証は不要だが、
         // クライアントを満足させるため OAuth エンドポイント群をダミー実装して常時許可する。
+        //
+        // TODO: 以下のいずれかが発生したら削除する
+        //   1. anthropics/claude-code #26917 / #38102 等の HTTP OAuth バグが修正される
+        //   2. 本物の認証機構を実装する必要が出る（偽 OAuth と衝突するため）
+        //   3. MCP spec が PKCE 検証・トークンローテーション必須等に更新される
+        //   4. stdio ブリッジが十分定着して HTTP transport 自体を deprecate する
 
         // RFC 9728 Protected Resource Metadata
         if (url === "/.well-known/oauth-protected-resource" && req.method === "GET") {
