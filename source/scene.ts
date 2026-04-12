@@ -86,12 +86,20 @@ function buildNodeRecursive(parent: any, spec: any): any {
 
     // Add components
     if (spec.components && Array.isArray(spec.components)) {
+        const { Sprite, Label } = require("cc");
         for (const compName of spec.components) {
             const CompClass = js.getClassByName(compName);
             if (CompClass) {
-                // Skip if already has this component (e.g. UITransform on UI nodes)
                 if (!node.getComponent(CompClass)) {
-                    node.addComponent(CompClass);
+                    const comp = node.addComponent(CompClass);
+                    // Sprite: sizeMode=CUSTOM でUITransformサイズの上書きを防ぐ
+                    if (comp instanceof Sprite) {
+                        comp.sizeMode = 0; // SizeMode.CUSTOM
+                    }
+                    // Label: useSystemFont=true で文字化け防止（フォントは後から設定可）
+                    if (comp instanceof Label) {
+                        comp.useSystemFont = true;
+                    }
                 }
             }
         }

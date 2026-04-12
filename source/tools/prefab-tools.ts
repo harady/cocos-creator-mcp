@@ -579,7 +579,10 @@ export class PrefabTools implements ToolCategory {
             const nodeUuid = treeResult.data?.uuid;
             if (!nodeUuid) return err("buildNodeTree returned no root node UUID");
 
-            // 4. autoBind 実行
+            // 4. フォント・SpriteFrame を Editor API 経由で設定（アセット依存追跡のため）
+            await this._applyDefaultAssets(nodeUuid);
+
+            // 5. autoBind 実行 (旧4)
             let autoBindResult: any = null;
             if (autoBind) {
                 if (!this._componentTools) {
@@ -596,7 +599,7 @@ export class PrefabTools implements ToolCategory {
                 } catch { autoBindResult = bindToolResult; }
             }
 
-            // 5. Prefab 作成
+            // 6. Prefab 作成
             const prefabAssetUuid = await (Editor.Message.request as any)(
                 "scene", "create-prefab", nodeUuid, prefabPath
             );
@@ -605,7 +608,7 @@ export class PrefabTools implements ToolCategory {
                 return err("create-prefab returned no asset UUID");
             }
 
-            // 6. 一時ノードを削除
+            // 7. 一時ノードを削除
             await (Editor.Message.request as any)("scene", "remove-node", { uuid: nodeUuid });
 
             return ok({
@@ -617,6 +620,53 @@ export class PrefabTools implements ToolCategory {
             });
         } catch (e: any) {
             return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * buildNodeTree で作成したノードツリーの Label にプロジェクトフォントを設定する。
+     * Editor API (scene:set-property) 経由で設定することでアセット依存が正しく追跡される。
+     */
+    private async _applyDefaultAssets(rootUuid: string): Promise<void> {
+        // プロジェクトのデフォルトフォントを検索（resources/fonts/ 配下の TTFFont）
+        let fontUuid: string | null = null;
+        try {
+            const assets = await Editor.Message.request("asset-db", "query-assets", {
+                pattern: "db://assets/resources/fonts/**",
+                ccType: "cc.TTFFont",
+            });
+            if (Array.isArray(assets) && assets.length > 0) {
+                fontUuid = assets[0].uuid;
+            }
+        } catch { /* ignore */ }
+
+        if (!fontUuid) return;
+
+        // 全子孫ノードを取得
+        const descendants = await this.sceneScript("getAllDescendants", [rootUuid]);
+        if (!descendants?.success) return;
+        const allNodes = [{ uuid: rootUuid, name: "root" }, ...descendants.data];
+
+        for (const node of allNodes) {
+            try {
+                const nodeDump = await (Editor.Message.request as any)("scene", "query-node", node.uuid);
+                if (!nodeDump) continue;
+                const comps = nodeDump.__comps__ || [];
+                for (let i = 0; i < comps.length; i++) {
+                    const compType = comps[i].type || "";
+                    // Label にフォント設定
+                    if (compType === "cc.Label") {
+                        const fontDump = comps[i].value?.font;
+                        if (!fontDump?.value?.uuid) {
+                            await (Editor.Message.request as any)("scene", "set-property", {
+                                uuid: node.uuid,
+                                path: `__comps__.${i}.font`,
+                                dump: { type: "cc.TTFFont", value: { uuid: fontUuid } },
+                            });
+                        }
+                    }
+                }
+            } catch { /* skip nodes that can't be queried */ }
         }
     }
 
