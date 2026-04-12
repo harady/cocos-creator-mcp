@@ -96,9 +96,11 @@ function buildNodeRecursive(parent: any, spec: any): any {
                     if (comp instanceof Sprite) {
                         comp.sizeMode = 0; // SizeMode.CUSTOM
                     }
-                    // Label: useSystemFont=true で文字化け防止（フォントは後から設定可）
+                    // Label: useSystemFont + 色を黒に（白パネル上で見えるように）
                     if (comp instanceof Label) {
                         comp.useSystemFont = true;
+                        const { Color } = require("cc");
+                        comp.color = new Color(51, 51, 51, 255);
                     }
                 }
             }
