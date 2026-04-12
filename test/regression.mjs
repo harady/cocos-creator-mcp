@@ -63,19 +63,20 @@ const ALL_TOOLS = [
     "asset_save", "asset_save_meta",
     "builder_get_settings", "builder_open_panel", "builder_query_tasks",
     "builder_run_preview", "builder_stop_preview",
-    "component_add", "component_get_available", "component_get_components",
+    "component_add", "component_auto_bind", "component_get_available", "component_get_components",
     "component_get_info", "component_query_enum", "component_remove", "component_set_property",
     "debug_clear_console", "debug_execute_script", "debug_get_console_logs",
     "debug_get_editor_info", "debug_get_extension_info", "debug_get_log_file_info",
     "debug_get_project_logs", "debug_list_extensions", "debug_list_messages",
     "debug_open_url", "debug_query_devices", "debug_search_project_logs", "debug_validate_scene",
-    "debug_batch_screenshot", "debug_game_command", "debug_screenshot",
-    "debug_record_start", "debug_record_stop",
+    "debug_batch_screenshot", "debug_clear_code_cache", "debug_game_command",
+    "debug_preview", "debug_screenshot",
+    "debug_record_start", "debug_record_stop", "debug_wait_compile",
     "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
     "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
     "node_set_property", "node_set_transform",
-    "prefab_close", "prefab_create", "prefab_create_and_replace", "prefab_duplicate",
-    "prefab_get_info", "prefab_instantiate",
+    "prefab_close", "prefab_create", "prefab_create_and_replace", "prefab_create_from_spec",
+    "prefab_duplicate", "prefab_get_info", "prefab_instantiate",
     "prefab_list", "prefab_open", "prefab_revert", "prefab_update", "prefab_validate",
     "preferences_get", "preferences_get_all", "preferences_reset", "preferences_set",
     "project_find_asset", "project_get_asset_info", "project_get_engine_info",
@@ -683,6 +684,102 @@ async function testV18NewTools() {
     // 2. debug_record_stop registered
     const stopTool = toolsList.result?.tools?.find((t) => t.name === "debug_record_stop");
     assert(!!stopTool, "debug_record_stop registered");
+}
+
+async function testV111NewTools() {
+    console.log("\n── v1.11 new tools (auto_bind / create_from_spec / wait_compile) ──");
+
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (!canvasUuid) { skip("v1.11 tests (no Canvas)"); return; }
+
+    // 1. component_auto_bind — built-in コンポーネント(cc.Button)でテスト
+    {
+        const tree = await callTool("node_create_tree", {
+            parent: canvasUuid,
+            spec: {
+                name: "AutoBindTest",
+                components: ["cc.UITransform"],
+                children: [
+                    { name: "ClickTarget", components: ["cc.UITransform", "cc.Sprite", "cc.Button"] },
+                ],
+            },
+        });
+        assert(tree.success === true, "auto_bind setup: create_tree");
+        if (tree.data?.uuid) {
+            // auto_bind は @property を持つスクリプトコンポーネントが必要なので、
+            // ここではツール自体が呼べること + not_found が返ることを確認
+            // (テスト環境にカスタムスクリプトがないため)
+            const bindResult = await callTool("component_auto_bind", {
+                uuid: tree.data.uuid,
+                componentType: "cc.UITransform",
+                mode: "strict",
+            });
+            // UITransform にはバインド対象の @property がないので boundCount=0
+            assert(bindResult.success === true, "auto_bind returns success");
+            assert(bindResult.boundCount === 0, "auto_bind: no bindable props on UITransform");
+            await callTool("node_delete", { uuid: tree.data.uuid });
+        }
+    }
+
+    // 2. prefab_create_from_spec — 基本フロー
+    {
+        const specPath = `db://assets/test/FromSpec_${Date.now()}.prefab`;
+        const spec = {
+            name: "SpecTestNode",
+            components: ["cc.UITransform"],
+            children: [
+                { name: "Header", components: ["cc.UITransform", "cc.Label"] },
+                { name: "Body", components: ["cc.UITransform"] },
+            ],
+        };
+        const result = await callTool("prefab_create_from_spec", { path: specPath, spec });
+        assert(result.success === true, "create_from_spec success");
+        assert(!!result.prefabAssetUuid, "create_from_spec returns prefabAssetUuid");
+        assert(result.path === specPath, "create_from_spec returns correct path");
+        assert(result.nodeTree?.name === "SpecTestNode", "create_from_spec returns nodeTree");
+        assert(result.nodeTree?.children?.length === 2, "create_from_spec nodeTree has 2 children");
+
+        // 元ノードがシーンに残っていないことを確認
+        if (result.nodeTree?.uuid) {
+            const ghost = await callTool("node_get_info", { uuid: result.nodeTree.uuid });
+            assert(!ghost.data || ghost.success === false, "temp node removed from scene");
+        }
+
+        // Prefab アセットが作成されたことを確認
+        if (result.prefabAssetUuid) {
+            const info = await callTool("prefab_get_info", { uuid: result.prefabAssetUuid });
+            assert(info.success === true, "created prefab asset exists");
+        }
+
+        // クリーンアップ
+        await callTool("asset_delete", { path: specPath });
+    }
+
+    // 3. prefab_create_from_spec — 上書きガード
+    {
+        // まず通常の Prefab を作成
+        const guardNode = await callTool("node_create", { name: "GuardNode", parent: canvasUuid });
+        const guardPath = `db://assets/test/SpecGuard_${Date.now()}.prefab`;
+        await callTool("prefab_create", { uuid: guardNode.uuid, path: guardPath });
+        await callTool("node_delete", { uuid: guardNode.uuid });
+
+        // 同じパスに create_from_spec → エラーになるべき
+        const dupResult = await callTool("prefab_create_from_spec", {
+            path: guardPath,
+            spec: { name: "ShouldFail", components: ["cc.UITransform"] },
+        });
+        assert(!!dupResult.error || !!dupResult._rpcError, "create_from_spec overwrite guard");
+
+        await callTool("asset_delete", { path: guardPath });
+    }
+
+    // 4. debug_wait_compile — ツール登録確認
+    {
+        const toolsList = await callMcp("tools/list", {});
+        const waitTool = toolsList.result?.tools?.find((t) => t.name === "debug_wait_compile");
+        assert(!!waitTool, "debug_wait_compile registered");
+    }
 }
 
 async function testStringifiedArgs() {
@@ -1401,6 +1498,7 @@ async function main() {
     await testNewEditorAPIs();
     await testV16NewTools();
     await testV18NewTools();
+    await testV111NewTools();
     await testStringifiedArgs();
     await testSceneCreate();
     await testDialogPrevention();

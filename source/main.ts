@@ -50,8 +50,9 @@ function createServer(config: ServerConfig): McpServer {
     const s = new McpServer(config);
     s.register(new SceneTools());
     s.register(new NodeTools());
-    s.register(new ComponentTools());
-    s.register(new PrefabTools());
+    const componentTools = new ComponentTools();
+    s.register(componentTools);
+    s.register(new PrefabTools(componentTools));
     s.register(new ProjectTools());
     s.register(new DebugTools());
     s.register(new SceneAdvancedTools());

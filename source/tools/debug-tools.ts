@@ -206,6 +206,17 @@ export class DebugTools implements ToolCategory {
                     required: ["pages"],
                 },
             },
+            {
+                name: "debug_wait_compile",
+                description: "Wait for TypeScript compilation to complete. Monitors the packer-driver debug log for 'Target(editor) ends' message. Use after modifying .ts files to ensure changes are compiled before operating on Prefabs. With clean=true, deletes compiled output first to force a fresh recompile (slower but guaranteed).",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        timeout: { type: "number", description: "Max wait time in ms (default: 15000)" },
+                        clean: { type: "boolean", description: "If true, delete compiled output first to force fresh recompile (default: false)" },
+                    },
+                },
+            },
         ];
     }
 
@@ -266,6 +277,8 @@ export class DebugTools implements ToolCategory {
                     return this.gameCommand("record_start", { fps: args.fps, quality: args.quality, coefficient: args.coefficient, videoBitsPerSecond: args.videoBitsPerSecond, format: args.format, savePath: args.savePath }, 5000);
                 case "debug_record_stop":
                     return this.gameCommand("record_stop", undefined, args.timeout || 30000);
+                case "debug_wait_compile":
+                    return this.waitCompile(args.timeout || 15000, args.clean ?? false);
                 default:
                     return err(`Unknown tool: ${toolName}`);
             }
@@ -779,6 +792,89 @@ export class DebugTools implements ToolCategory {
             };
             if (Array.isArray(tree)) checkNodes(tree);
             return ok({ success: true, issueCount: issues.length, issues });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * TypeScript コンパイル完了を待つ。
+     * packer-driver の debug.log に "Target(editor) ends" が現れるのを監視する。
+     * 既にコンパイル済み（直近数秒以内に完了ログあり）なら即座に返す。
+     */
+    private async waitCompile(timeout: number, clean: boolean): Promise<ToolResult> {
+        try {
+            const fs = require("fs");
+            const path = require("path");
+            const logPath = path.join(Editor.Project.path, "temp", "programming", "packer-driver", "logs", "debug.log");
+            const chunksDir = path.join(Editor.Project.path, "temp", "programming", "packer-driver", "targets", "editor", "chunks");
+
+            if (!fs.existsSync(logPath)) {
+                return err(`Compile log not found: ${logPath}`);
+            }
+
+            const MARKER = "Target(editor) ends";
+
+            // clean モード: コードキャッシュクリア + soft-reload で再コンパイルを強制
+            if (clean) {
+                // Developer > Cache > Clear code cache をクリック
+                try {
+                    const electron = require("electron");
+                    const menu = electron.Menu.getApplicationMenu();
+                    const findMenuItem = (items: any[], labels: string[]): any => {
+                        for (const item of items) {
+                            if (item.label === labels[0]) {
+                                if (labels.length === 1) return item;
+                                if (item.submenu?.items) return findMenuItem(item.submenu.items, labels.slice(1));
+                            }
+                        }
+                        return null;
+                    };
+                    const cacheItem = menu ? findMenuItem(menu.items, ["Developer", "Cache", "Clear code cache"]) : null;
+                    if (cacheItem) cacheItem.click();
+                } catch (_e) { /* ignore */ }
+                await new Promise(r => setTimeout(r, 500));
+                // soft-reload でシーンを再読み込み → コンパイルトリガー
+                await (Editor.Message.request as any)("scene", "soft-reload").catch(() => {});
+            }
+
+            // refresh-asset でファイル変更を CC に通知してコンパイルをトリガー
+            await (Editor.Message.request as any)("asset-db", "refresh-asset", "db://assets").catch(() => {});
+
+            const initialSize = fs.statSync(logPath).size;
+            const startTime = Date.now();
+            const POLL_INTERVAL = 200;
+            const DETECT_GRACE_MS = 2000; // CC がファイル変更を検知するまでの猶予
+
+            while (Date.now() - startTime < timeout) {
+                await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+                const currentSize = fs.statSync(logPath).size;
+
+                // ログが成長していない
+                if (currentSize <= initialSize) {
+                    // clean モードでは必ずコンパイルが走るので猶予判定しない
+                    if (clean) continue;
+                    // 猶予期間内はまだ待つ (CC の検知が遅い可能性)
+                    if (Date.now() - startTime < DETECT_GRACE_MS) continue;
+                    // 猶予期間を過ぎてもログが成長しない → コンパイル不要
+                    return ok({ success: true, compiled: true, waitedMs: Date.now() - startTime, note: "No compilation triggered (no changes detected)" });
+                }
+
+                // ログが成長した → 新しい部分にマーカーがあるか確認
+                const fd = fs.openSync(logPath, "r");
+                const newBytes = currentSize - initialSize;
+                const buffer = Buffer.alloc(newBytes);
+                fs.readSync(fd, buffer, 0, newBytes, initialSize);
+                fs.closeSync(fd);
+                const newContent = buffer.toString("utf8");
+
+                if (newContent.includes(MARKER)) {
+                    return ok({ success: true, compiled: true, waitedMs: Date.now() - startTime });
+                }
+            }
+
+            return ok({ success: true, compiled: false, timeout: true, waitedMs: timeout });
         } catch (e: any) {
             return err(e.message || String(e));
         }

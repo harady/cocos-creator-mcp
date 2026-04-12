@@ -1,6 +1,8 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
 import { ensureSceneSafeToSwitch, safeSaveScene } from "./scene-tools";
+import { parseMaybeJson } from "../utils";
+import type { ComponentTools } from "./component-tools";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -19,6 +21,11 @@ export class PrefabTools implements ToolCategory {
     private _pendingNestedPrefabs: NestedPrefabEntry[] = [];
     /** prefab_open で開いた Prefab アセット UUID */
     private _currentPrefabUuid: string | null = null;
+    private _componentTools: ComponentTools | null;
+
+    constructor(componentTools?: ComponentTools) {
+        this._componentTools = componentTools ?? null;
+    }
 
     getTools(): ToolDefinition[] {
         return [
@@ -146,6 +153,19 @@ export class PrefabTools implements ToolCategory {
                     },
                 },
             },
+            {
+                name: "prefab_create_from_spec",
+                description: "Create a prefab from a JSON spec in one call. Combines node_create_tree + component_auto_bind + prefab_create into a single operation. Spec extends node_create_tree format with optional autoBind field. Example: { name: 'MyPopup', components: ['cc.UITransform', 'MyPopupView'], autoBind: 'MyPopupView', children: [{ name: 'CloseButton', components: ['cc.Button'] }] }",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        path: { type: "string", description: "db:// path for the prefab (e.g. 'db://assets/prefabs/MyPrefab.prefab')" },
+                        spec: { description: "Node tree specification with optional autoBind field (string for component type to auto-bind)" },
+                        autoBindMode: { type: "string", enum: ["fuzzy", "strict"], description: "Auto-bind matching mode (default: fuzzy)" },
+                    },
+                    required: ["path", "spec"],
+                },
+            },
         ];
     }
 
@@ -182,6 +202,8 @@ export class PrefabTools implements ToolCategory {
                 return this.openPrefab(args.uuid, args.path, !!args.force);
             case "prefab_close":
                 return this.closePrefab(args.save !== false, args.sceneUuid, !!args.force);
+            case "prefab_create_from_spec":
+                return this.createFromSpec(args.path, parseMaybeJson(args.spec), args.autoBindMode ?? "fuzzy");
             default:
                 return err(`Unknown tool: ${toolName}`);
         }
@@ -527,6 +549,124 @@ export class PrefabTools implements ToolCategory {
             return ok({ success: true, returnedToScene: targetScene });
         } catch (e: any) {
             return err(e.message || String(e));
+        }
+    }
+
+    private async createFromSpec(prefabPath: string, spec: any, autoBindMode: string): Promise<ToolResult> {
+        try {
+            // 1. 既存 Prefab チェック
+            const existing = await this.assetExists(prefabPath);
+            if (existing) {
+                return err(
+                    `Prefab already exists at "${prefabPath}". Delete it first or use a different path.`
+                );
+            }
+
+            // 2. シーンの最初の cc.Node UUID を取得（Scene UUID ではなく Canvas 等）
+            const hier = await this.sceneScript("getSceneHierarchy", [false]);
+            const hierarchy = hier?.hierarchy || [];
+            const firstNode = hierarchy[0];
+            if (!firstNode?.uuid) return err("Could not find a node in the current scene to use as parent");
+            const parentUuid = firstNode.uuid;
+
+            // 3. ノードツリーを構築
+            const autoBind = spec.autoBind;
+            const cleanSpec = { ...spec };
+            delete cleanSpec.autoBind;
+
+            const treeResult = await this.sceneScript("buildNodeTree", [parentUuid, cleanSpec]);
+            if (!treeResult?.success) return err(treeResult?.error || "buildNodeTree failed");
+            const nodeUuid = treeResult.data?.uuid;
+            if (!nodeUuid) return err("buildNodeTree returned no root node UUID");
+
+            // 4. フォント・SpriteFrame を Editor API 経由で設定（アセット依存追跡のため）
+            await this._applyDefaultAssets(nodeUuid);
+
+            // 5. autoBind 実行 (旧4)
+            let autoBindResult: any = null;
+            if (autoBind) {
+                if (!this._componentTools) {
+                    return err("autoBind requires ComponentTools dependency (internal configuration error)");
+                }
+                const bindToolResult = await this._componentTools.execute("component_auto_bind", {
+                    uuid: nodeUuid,
+                    componentType: autoBind,
+                    force: false,
+                    mode: autoBindMode,
+                });
+                try {
+                    autoBindResult = JSON.parse(bindToolResult.content[0].text);
+                } catch { autoBindResult = bindToolResult; }
+            }
+
+            // 6. Prefab 作成
+            const prefabAssetUuid = await (Editor.Message.request as any)(
+                "scene", "create-prefab", nodeUuid, prefabPath
+            );
+            if (!prefabAssetUuid) {
+                await (Editor.Message.request as any)("scene", "remove-node", { uuid: nodeUuid });
+                return err("create-prefab returned no asset UUID");
+            }
+
+            // 7. 一時ノードを削除
+            await (Editor.Message.request as any)("scene", "remove-node", { uuid: nodeUuid });
+
+            return ok({
+                success: true,
+                prefabAssetUuid,
+                path: prefabPath,
+                nodeTree: treeResult.data,
+                autoBind: autoBindResult,
+            });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * buildNodeTree で作成したノードツリーの Label にプロジェクトフォントを設定する。
+     * Editor API (scene:set-property) 経由で設定することでアセット依存が正しく追跡される。
+     */
+    private async _applyDefaultAssets(rootUuid: string): Promise<void> {
+        // プロジェクトのデフォルトフォントを検索（resources/fonts/ 配下の TTFFont）
+        let fontUuid: string | null = null;
+        try {
+            const assets = await Editor.Message.request("asset-db", "query-assets", {
+                pattern: "db://assets/resources/fonts/**",
+                ccType: "cc.TTFFont",
+            });
+            if (Array.isArray(assets) && assets.length > 0) {
+                fontUuid = assets[0].uuid;
+            }
+        } catch { /* ignore */ }
+
+        if (!fontUuid) return;
+
+        // 全子孫ノードを取得
+        const descendants = await this.sceneScript("getAllDescendants", [rootUuid]);
+        if (!descendants?.success) return;
+        const allNodes = [{ uuid: rootUuid, name: "root" }, ...descendants.data];
+
+        for (const node of allNodes) {
+            try {
+                const nodeDump = await (Editor.Message.request as any)("scene", "query-node", node.uuid);
+                if (!nodeDump) continue;
+                const comps = nodeDump.__comps__ || [];
+                for (let i = 0; i < comps.length; i++) {
+                    const compType = comps[i].type || "";
+                    // Label にフォント設定
+                    if (compType === "cc.Label") {
+                        const fontDump = comps[i].value?.font;
+                        if (!fontDump?.value?.uuid) {
+                            await (Editor.Message.request as any)("scene", "set-property", {
+                                uuid: node.uuid,
+                                path: `__comps__.${i}.font`,
+                                dump: { type: "cc.TTFFont", value: { uuid: fontUuid } },
+                            });
+                        }
+                    }
+                }
+            } catch { /* skip nodes that can't be queried */ }
         }
     }
 

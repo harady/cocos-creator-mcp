@@ -354,6 +354,17 @@ export class McpServer {
                         level: entry.level || "log",
                         message: entry.message || "",
                     });
+                    // __debug_state__ ログから userId を debug-menu.json に保存
+                    try {
+                        const msg = JSON.parse(entry.message || "");
+                        if (msg.__debug_state__ && msg.userId) {
+                            const _fs = require("fs");
+                            const _path = require("path");
+                            const projectPath = (global as any).Editor?.Project?.path || process.cwd();
+                            const settingsPath = _path.join(projectPath, "settings", "debug-menu.json");
+                            _fs.writeFileSync(settingsPath, JSON.stringify({ userId: msg.userId }, null, 2), "utf-8");
+                        }
+                    } catch { /* not debug_state */ }
                 }
                 if (_gameLogs.length > MAX_GAME_LOG_BUFFER) {
                     _gameLogs.splice(0, _gameLogs.length - MAX_GAME_LOG_BUFFER);
@@ -455,7 +466,8 @@ export class McpServer {
                     try {
                         const start = Date.now();
                         console.log(`[cocos-creator-mcp] ▶ ${toolName}`, Object.keys(args).length > 0 ? JSON.stringify(args).substring(0, 200) : "");
-                        const result = await withTimeout(category.execute(toolName, args), 30000, `Tool ${toolName} timed out`);
+                        const timeoutMs = (toolName.startsWith("prefab_") || toolName === "scene_open") ? 120000 : 30000;
+                        const result = await withTimeout(category.execute(toolName, args), timeoutMs, `Tool ${toolName} timed out`);
                         console.log(`[cocos-creator-mcp] ✓ ${toolName} (${Date.now() - start}ms)`);
                         response = {
                             jsonrpc: "2.0",
