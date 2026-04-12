@@ -562,17 +562,19 @@ export class PrefabTools implements ToolCategory {
                 );
             }
 
-            // 2. シーンルート UUID を取得
-            const tree = await Editor.Message.request("scene", "query-node-tree");
-            const rootUuid = Array.isArray(tree) ? (tree[0] as any)?.uuid : (tree as any)?.uuid;
-            if (!rootUuid) return err("Could not determine scene root UUID");
+            // 2. シーンの最初の cc.Node UUID を取得（Scene UUID ではなく Canvas 等）
+            const hier = await this.sceneScript("getSceneHierarchy", [false]);
+            const hierarchy = hier?.hierarchy || [];
+            const firstNode = hierarchy[0];
+            if (!firstNode?.uuid) return err("Could not find a node in the current scene to use as parent");
+            const parentUuid = firstNode.uuid;
 
             // 3. ノードツリーを構築
             const autoBind = spec.autoBind;
             const cleanSpec = { ...spec };
             delete cleanSpec.autoBind;
 
-            const treeResult = await this.sceneScript("buildNodeTree", [rootUuid, cleanSpec]);
+            const treeResult = await this.sceneScript("buildNodeTree", [parentUuid, cleanSpec]);
             if (!treeResult?.success) return err(treeResult?.error || "buildNodeTree failed");
             const nodeUuid = treeResult.data?.uuid;
             if (!nodeUuid) return err("buildNodeTree returned no root node UUID");
