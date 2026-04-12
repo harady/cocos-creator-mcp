@@ -87,6 +87,19 @@ export class ComponentTools implements ToolCategory {
                 inputSchema: { type: "object", properties: {} },
             },
             {
+                name: "component_auto_bind",
+                description: "Automatically bind @property references by matching property names to descendant node names. For each unset Node/Component reference property, searches for a child node whose name matches the property name (camelCase→PascalCase). Skips already-bound properties and non-reference types (primitives, assets).",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID (the node with the script component)" },
+                        componentType: { type: "string", description: "Script component class name (e.g. 'QuestReadyPageView')" },
+                        force: { type: "boolean", description: "If true, rebind even already-bound properties (default: false)" },
+                    },
+                    required: ["uuid", "componentType"],
+                },
+            },
+            {
                 name: "component_query_enum",
                 description: "Get enum values for a component property. Useful for knowing what values Layout.type, Layout.resizeMode, etc. accept.",
                 inputSchema: {
@@ -133,6 +146,8 @@ export class ComponentTools implements ToolCategory {
                     return ok({ success: true, classes });
                 } catch (e: any) { return err(e.message || String(e)); }
             }
+            case "component_auto_bind":
+                return this.autoBind(args.uuid, compType, args.force ?? false);
             case "component_query_enum":
                 return this.queryEnum(args.uuid, compType, args.property);
             default:
@@ -202,6 +217,94 @@ export class ComponentTools implements ToolCategory {
         } catch (e: any) {
             return err(e.message || String(e));
         }
+    }
+
+    /**
+     * @property 名とノード名を自動マッチングしてバインドする。
+     * camelCase プロパティ名 → PascalCase ノード名で検索。
+     * Node/Component 参照型で未バインドのプロパティのみ対象。
+     */
+    private async autoBind(nodeUuid: string, componentType: string, force: boolean): Promise<ToolResult> {
+        try {
+            const nodeDump = await (Editor.Message.request as any)("scene", "query-node", nodeUuid);
+            if (!nodeDump) return err("Node not found");
+
+            const comps = nodeDump.__comps__ || [];
+            const compName = componentType.replace("cc.", "");
+            const compIndex = comps.findIndex((c: any) => {
+                const t = c.type || "";
+                return t === compName || t === `cc.${compName}`;
+            });
+            if (compIndex < 0) return err(`Component ${componentType} not found on node`);
+
+            const compDump = comps[compIndex];
+            const properties = compDump.value || {};
+            const skipKeys = new Set(["uuid", "name", "enabled", "node", "__scriptAsset", "__prefab", "_name", "_objFlags", "_enabled"]);
+
+            const results: any[] = [];
+
+            for (const [propName, propDumpRaw] of Object.entries(properties)) {
+                if (skipKeys.has(propName) || propName.startsWith("_")) continue;
+
+                const propDump = propDumpRaw as any;
+                const propType = propDump.type as string;
+                if (!propType) continue;
+
+                const extendsArr = (propDump.extends || []) as string[];
+                const isNodeRef = propType === "cc.Node";
+                const isComponentRef = extendsArr.includes("cc.Component");
+
+                if (!isNodeRef && !isComponentRef) continue;
+
+                // 既にバインド済みならスキップ（force でない限り）
+                const currentValue = propDump.value;
+                if (!force && currentValue?.uuid) {
+                    results.push({ property: propName, status: "already_bound" });
+                    continue;
+                }
+
+                // プロパティ名→ノード名の候補
+                const candidates = this.propertyNameToNodeNames(propName);
+
+                let foundNodeUuid: string | null = null;
+                let matchedName: string | null = null;
+                for (const candidate of candidates) {
+                    const searchResult = await this.sceneScript("findNodesByName", [candidate]);
+                    if (searchResult?.success && searchResult.data?.length > 0) {
+                        foundNodeUuid = searchResult.data[0].uuid;
+                        matchedName = candidate;
+                        break;
+                    }
+                }
+
+                if (!foundNodeUuid) {
+                    results.push({ property: propName, type: propType, status: "not_found", candidates });
+                    continue;
+                }
+
+                const path = `__comps__.${compIndex}.${propName}`;
+                const dump = await this.buildDumpWithTypeInfo(nodeUuid, path, foundNodeUuid);
+                const setResult = await this.sceneScript("setPropertyViaEditor", [nodeUuid, path, dump]);
+                results.push({ property: propName, status: "bound", nodeName: matchedName, success: setResult?.success !== false });
+            }
+
+            const boundCount = results.filter(r => r.status === "bound").length;
+            const notFoundCount = results.filter(r => r.status === "not_found").length;
+            return ok({ success: true, boundCount, notFoundCount, results });
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * camelCase プロパティ名からノード名の候補を生成。
+     * closeButton → ["CloseButton", "closeButton"]
+     */
+    private propertyNameToNodeNames(propName: string): string[] {
+        const pascal = propName.charAt(0).toUpperCase() + propName.slice(1);
+        const names = [pascal];
+        if (pascal !== propName) names.push(propName);
+        return names;
     }
 
     private async setProperty(uuid: string, componentType: string, property: string, value: any): Promise<ToolResult> {
