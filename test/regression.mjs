@@ -54,7 +54,7 @@ function skip(label) {
     skipped++;
 }
 
-// ── ALL 145 tool names ──
+// ── ALL 146 tool names ──
 const ALL_TOOLS = [
     "asset_copy", "asset_create", "asset_delete", "asset_generate_available_url",
     "asset_get_dependencies", "asset_get_details", "asset_import", "asset_move",
@@ -74,7 +74,7 @@ const ALL_TOOLS = [
     "debug_record_start", "debug_record_stop", "debug_wait_compile",
     "node_create", "node_delete", "node_detect_type", "node_duplicate", "node_find_by_name",
     "node_get_all", "node_get_info", "node_move", "node_set_active", "node_set_layer",
-    "node_set_property", "node_set_transform",
+    "node_set_layout", "node_set_property", "node_set_transform",
     "prefab_close", "prefab_create", "prefab_create_and_replace", "prefab_create_from_spec",
     "prefab_duplicate", "prefab_get_info", "prefab_instantiate",
     "prefab_list", "prefab_open", "prefab_revert", "prefab_update", "prefab_validate",
@@ -780,6 +780,74 @@ async function testV111NewTools() {
         const waitTool = toolsList.result?.tools?.find((t) => t.name === "debug_wait_compile");
         assert(!!waitTool, "debug_wait_compile registered");
     }
+}
+
+async function testPrefabEfficiency() {
+    console.log("\n── prefab efficiency (nodeName / screenshot / node_set_layout) ──");
+    const hier = await callTool("scene_get_hierarchy");
+    const canvasUuid = hier.hierarchy?.find((n) => n.name === "Canvas")?.uuid;
+    if (!canvasUuid) { skip("prefab efficiency tests (no Canvas)"); return; }
+
+    // 1. node_set_layout — ツール登録確認
+    const toolsList = await callMcp("tools/list", {});
+    const layoutTool = toolsList.result?.tools?.find((t) => t.name === "node_set_layout");
+    assert(!!layoutTool, "node_set_layout registered");
+
+    // 2. nodeName でノード作成→プロパティ設定
+    const created = await callTool("node_create", { name: "EfficiencyTestNode", parent: canvasUuid, components: ["cc.Label"] });
+    const uuid = created.uuid;
+
+    // 2a. component_set_property with nodeName (uuid なし)
+    const setByName = await callTool("component_set_property", {
+        nodeName: "EfficiencyTestNode",
+        componentType: "cc.Label",
+        property: "string",
+        value: "byName",
+    });
+    assert(setByName.success === true, "component_set_property by nodeName");
+
+    // 2b. component_get_components with nodeName
+    const compsByName = await callTool("component_get_components", { nodeName: "EfficiencyTestNode" });
+    assert(compsByName.components?.some((c) => c.type === "Label"), "component_get_components by nodeName");
+
+    // 3. component_set_property with screenshot=true
+    const setWithSS = await callTool("component_set_property", {
+        uuid,
+        componentType: "cc.Label",
+        property: "fontSize",
+        value: 48,
+        screenshot: true,
+    });
+    assert(setWithSS.success === true, "set_property with screenshot");
+    assert(!!setWithSS.screenshot?.path || !!setWithSS.screenshotError, "screenshot result or error returned");
+
+    // 4. node_set_layout — contentSize + widget
+    const layoutResult = await callTool("node_set_layout", {
+        uuid,
+        contentSize: { width: 300, height: 100 },
+        widget: { left: 10, right: 10 },
+    });
+    assert(layoutResult.success === true, "node_set_layout contentSize + widget");
+    assert(layoutResult.results?.length >= 2, "node_set_layout multiple results");
+
+    // 5. node_set_layout by nodeName
+    const layoutByName = await callTool("node_set_layout", {
+        nodeName: "EfficiencyTestNode",
+        anchorPoint: { x: 0, y: 1 },
+    });
+    assert(layoutByName.success === true, "node_set_layout by nodeName");
+
+    // 6. node_set_layout with screenshot
+    const layoutSS = await callTool("node_set_layout", {
+        uuid,
+        contentSize: { width: 200, height: 80 },
+        screenshot: true,
+    });
+    assert(layoutSS.success === true, "node_set_layout with screenshot");
+    assert(!!layoutSS.screenshot?.path || !!layoutSS.screenshotError, "node_set_layout screenshot result");
+
+    // Cleanup
+    await callTool("node_delete", { uuid });
 }
 
 async function testStringifiedArgs() {
@@ -1499,6 +1567,7 @@ async function main() {
     await testV16NewTools();
     await testV18NewTools();
     await testV111NewTools();
+    await testPrefabEfficiency();
     await testStringifiedArgs();
     await testSceneCreate();
     await testDialogPrevention();

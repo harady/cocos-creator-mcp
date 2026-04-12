@@ -1,6 +1,8 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
 import { parseMaybeJson } from "../utils";
+import { resolveNodeUuid } from "../node-resolve";
+import { takeEditorScreenshot } from "../screenshot";
 
 const EXT_NAME = "cocos-creator-mcp";
 
@@ -176,6 +178,46 @@ export class NodeTools implements ToolCategory {
                     required: ["parent", "spec"],
                 },
             },
+            {
+                name: "node_set_layout",
+                description: "Set UITransform (contentSize, anchorPoint) and Widget (margins) on a node in one call. Much faster than calling component_set_property multiple times for layout adjustments. Set screenshot=true to capture the editor after changes.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uuid: { type: "string", description: "Node UUID (either uuid or nodeName required)" },
+                        nodeName: { type: "string", description: "Node name to find (alternative to uuid)" },
+                        contentSize: {
+                            type: "object",
+                            properties: { width: { type: "number" }, height: { type: "number" } },
+                            description: "UITransform contentSize {width, height}",
+                        },
+                        anchorPoint: {
+                            type: "object",
+                            properties: { x: { type: "number" }, y: { type: "number" } },
+                            description: "UITransform anchorPoint {x, y} (0-1)",
+                        },
+                        widget: {
+                            type: "object",
+                            properties: {
+                                top: { type: "number" }, bottom: { type: "number" },
+                                left: { type: "number" }, right: { type: "number" },
+                                horizontalCenter: { type: "number" }, verticalCenter: { type: "number" },
+                                isAlignTop: { type: "boolean" }, isAlignBottom: { type: "boolean" },
+                                isAlignLeft: { type: "boolean" }, isAlignRight: { type: "boolean" },
+                                isAlignHorizontalCenter: { type: "boolean" }, isAlignVerticalCenter: { type: "boolean" },
+                            },
+                            description: "Widget alignment margins. Setting a value (e.g. top:0) automatically enables the corresponding alignment (isAlignTop:true).",
+                        },
+                        color: {
+                            type: "object",
+                            properties: { r: { type: "number" }, g: { type: "number" }, b: { type: "number" }, a: { type: "number" } },
+                            description: "Node color {r,g,b,a} (0-255)",
+                        },
+                        opacity: { type: "number", description: "Node opacity (0-255)" },
+                        screenshot: { type: "boolean", description: "If true, capture editor screenshot after changes (default: false)" },
+                    },
+                },
+            },
         ];
     }
 
@@ -208,6 +250,8 @@ export class NodeTools implements ToolCategory {
                 return this.setProperty(args.uuid, "layer", args.layer);
             case "node_create_tree":
                 return this.createNodeTree(args.parent, parseMaybeJson(args.spec));
+            case "node_set_layout":
+                return this.setLayout(args);
             case "node_detect_type": {
                 try {
                     const info = await this.sceneScript("getNodeInfo", [args.uuid]);
@@ -229,7 +273,7 @@ export class NodeTools implements ToolCategory {
     private static readonly SCENE_EDIT_TOOLS = new Set([
         "node_create", "node_delete", "node_move", "node_duplicate",
         "node_set_property", "node_set_transform", "node_set_active", "node_set_layer",
-        "node_create_tree",
+        "node_create_tree", "node_set_layout",
     ]);
 
     private async rejectIfPreviewRunning(toolName: string): Promise<ToolResult | null> {
@@ -385,6 +429,138 @@ export class NodeTools implements ToolCategory {
         try {
             const result = await this.sceneScript("getAllNodes", []);
             return ok(result);
+        } catch (e: any) {
+            return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * UITransform + Widget + color/opacity をまとめて設定する。
+     * Widget の値を指定すると、対応する isAlign* フラグを自動で true にする。
+     */
+    private async setLayout(args: Record<string, any>): Promise<ToolResult> {
+        try {
+            // nodeName → uuid 解決
+            let uuid = args.uuid;
+            if (!uuid && args.nodeName) {
+                const resolved = await resolveNodeUuid({ nodeName: args.nodeName });
+                uuid = resolved.uuid;
+            }
+            if (!uuid) return err("Either 'uuid' or 'nodeName' is required");
+
+            const results: any[] = [];
+
+            // UITransform の設定
+            const contentSize = parseMaybeJson(args.contentSize);
+            const anchorPoint = parseMaybeJson(args.anchorPoint);
+            if (contentSize || anchorPoint) {
+                const nodeInfo = await this.sceneScript("getNodeInfo", [uuid]);
+                if (!nodeInfo?.success) return err(`Node ${uuid} not found`);
+                const comps = nodeInfo.data?.components || [];
+                const utIdx = comps.findIndex((c: any) => c.type === "UITransform");
+                if (utIdx < 0) return err("Node has no UITransform component");
+
+                if (contentSize) {
+                    const path = `__comps__.${utIdx}.contentSize`;
+                    const dump = { value: { width: { value: contentSize.width }, height: { value: contentSize.height } } };
+                    const r = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
+                    results.push({ property: "contentSize", success: r?.success !== false });
+                }
+                if (anchorPoint) {
+                    const path = `__comps__.${utIdx}.anchorPoint`;
+                    const dump = { value: { x: { value: anchorPoint.x }, y: { value: anchorPoint.y } } };
+                    const r = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
+                    results.push({ property: "anchorPoint", success: r?.success !== false });
+                }
+            }
+
+            // Widget の設定
+            const widget = parseMaybeJson(args.widget);
+            if (widget) {
+                // Widget コンポーネントを探す（なければ追加）
+                let nodeInfo = await this.sceneScript("getNodeInfo", [uuid]);
+                if (!nodeInfo?.success) return err(`Node ${uuid} not found`);
+                let comps = nodeInfo.data?.components || [];
+                let wIdx = comps.findIndex((c: any) => c.type === "Widget");
+                if (wIdx < 0) {
+                    await this.sceneScript("addComponentToNode", [uuid, "cc.Widget"]);
+                    // 再取得
+                    nodeInfo = await this.sceneScript("getNodeInfo", [uuid]);
+                    comps = nodeInfo.data?.components || [];
+                    wIdx = comps.findIndex((c: any) => c.type === "Widget");
+                    if (wIdx < 0) return err("Failed to add Widget component");
+                    results.push({ property: "Widget", action: "added" });
+                }
+
+                // isAlign* を自動設定（値があれば true にする）
+                const alignMap: Record<string, string> = {
+                    top: "isAlignTop", bottom: "isAlignBottom",
+                    left: "isAlignLeft", right: "isAlignRight",
+                    horizontalCenter: "isAlignHorizontalCenter",
+                    verticalCenter: "isAlignVerticalCenter",
+                };
+
+                for (const [key, value] of Object.entries(widget)) {
+                    // isAlign* を明示指定した場合はそのまま設定
+                    const path = `__comps__.${wIdx}.${key}`;
+                    if (typeof value === "boolean") {
+                        const dump = { value, type: "Boolean" };
+                        await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
+                        results.push({ property: `Widget.${key}`, success: true });
+                    } else if (typeof value === "number") {
+                        // まず対応する isAlign* を true にする
+                        const alignKey = alignMap[key];
+                        if (alignKey && widget[alignKey] === undefined) {
+                            const alignPath = `__comps__.${wIdx}.${alignKey}`;
+                            await this.sceneScript("setPropertyViaEditor", [uuid, alignPath, { value: true, type: "Boolean" }]);
+                        }
+                        const dump = { value, type: "Number" };
+                        await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
+                        results.push({ property: `Widget.${key}`, success: true });
+                    }
+                }
+            }
+
+            // color
+            const color = parseMaybeJson(args.color);
+            if (color) {
+                const r = await this.sceneScript("setNodeProperty", [uuid, "color", color]);
+                results.push({ property: "color", success: r?.success !== false });
+            }
+
+            // opacity
+            if (args.opacity !== undefined) {
+                // cc.UIOpacity を使う（なければ color.a で設定）
+                const nodeInfo = await this.sceneScript("getNodeInfo", [uuid]);
+                const comps = nodeInfo?.data?.components || [];
+                const opIdx = comps.findIndex((c: any) => c.type === "UIOpacity");
+                if (opIdx >= 0) {
+                    const path = `__comps__.${opIdx}.opacity`;
+                    await this.sceneScript("setPropertyViaEditor", [uuid, path, { value: args.opacity, type: "Number" }]);
+                    results.push({ property: "UIOpacity.opacity", success: true });
+                } else {
+                    // UIOpacity がない場合は color.a を直接設定
+                    const currentColor = nodeInfo?.data?.color || { r: 255, g: 255, b: 255, a: 255 };
+                    currentColor.a = args.opacity;
+                    const r = await this.sceneScript("setNodeProperty", [uuid, "color", currentColor]);
+                    results.push({ property: "color.a", success: r?.success !== false });
+                }
+            }
+
+            const allOk = results.every(r => r.success !== false);
+            let response: any = { success: allOk, uuid, results };
+
+            // screenshot
+            if (args.screenshot) {
+                try {
+                    const ss = await takeEditorScreenshot();
+                    response.screenshot = { path: ss.path, size: ss.savedSize };
+                } catch (ssErr: any) {
+                    response.screenshotError = ssErr.message || String(ssErr);
+                }
+            }
+
+            return ok(response);
         } catch (e: any) {
             return err(e.message || String(e));
         }
