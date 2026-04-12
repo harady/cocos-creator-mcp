@@ -1029,6 +1029,61 @@ async function testDialogPrevention() {
     if (leftover?.uuid) {
         await callTool("node_delete", { uuid: leftover.uuid });
     }
+
+    // 6. untitled + dirty → scene_open でダイアログなしで切替（変更破棄）
+    //    scene_create でuntitledシーンを開き、手動変更を模倣してdirtyにし、scene_openで切替
+    const newScene = await callTool("scene_create", {});
+    if (newScene.success) {
+        // 新しいuntitledシーンに切り替わるまで待つ
+        const createDeadline = Date.now() + 5000;
+        while (Date.now() < createDeadline) {
+            const now = await callTool("scene_get_current");
+            const name = now.sceneName || now.data?.sceneName || "";
+            if (["scene-2d", "scene-3d", "Untitled", "NewScene", ""].includes(name)) break;
+            await new Promise((r) => setTimeout(r, 200));
+        }
+
+        // undo 経由で dirty にする
+        await callTool("scene_begin_undo");
+        const tmpNode = await callTool("node_create", { name: "UntitledDirtyTest" });
+        if (tmpNode.uuid) {
+            await callTool("component_add", { uuid: tmpNode.uuid, componentType: "cc.UITransform" });
+            await callTool("component_set_property", {
+                uuid: tmpNode.uuid, componentType: "cc.UITransform",
+                property: "contentSize", value: { width: 100, height: 100 },
+            });
+        }
+        await callTool("scene_end_undo");
+
+        const dirtyCheck = await callTool("scene_query_dirty");
+        const isDirty = dirtyCheck.dirty || dirtyCheck.data?.dirty;
+
+        if (isDirty) {
+            // untitled + dirty → scene_open で切替（ダイアログ自動応答で変更破棄）
+            const untitledSwitch = await callTool("scene_open", { scene: TEST_SCENE_PATH });
+            assert(untitledSwitch.success === true,
+                "untitled dirty → scene_open succeeds (dialog auto-discarded)");
+        } else {
+            // dirty にならなかった場合 — undo 経由でも dirty にならない環境がある
+            skip("untitled dirty test: scene did not become dirty via MCP (manual edit required)");
+        }
+
+        // scene_create で作成されたシーンファイルを削除
+        if (newScene.path) {
+            await callTool("asset_delete", { path: newScene.path });
+        }
+
+        // _regression に戻す
+        if (regUuid) {
+            await callTool("scene_open", { scene: regUuid });
+            const deadline3 = Date.now() + SWITCH_TIMEOUT_MS;
+            while (Date.now() < deadline3) {
+                const now = await callTool("scene_get_current");
+                if ((now.sceneName || now.data?.sceneName) === "_regression") break;
+                await new Promise((r) => setTimeout(r, 200));
+            }
+        }
+    }
 }
 
 async function testUncoveredTools() {
