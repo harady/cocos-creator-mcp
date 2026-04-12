@@ -88,13 +88,14 @@ export class ComponentTools implements ToolCategory {
             },
             {
                 name: "component_auto_bind",
-                description: "Automatically bind @property references by matching property names to descendant node names. For each unset Node/Component reference property, searches for a child node whose name matches the property name (camelCase→PascalCase). Skips already-bound properties and non-reference types (primitives, assets).",
+                description: "Automatically bind @property references by matching property names to descendant node names. Searches only descendants of the target node. Validates component type existence. Supports array properties (Slot_0, Slot_1...). Mode: 'fuzzy' (default) tries exact match first, then case-insensitive; 'strict' requires exact match only.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         uuid: { type: "string", description: "Node UUID (the node with the script component)" },
                         componentType: { type: "string", description: "Script component class name (e.g. 'QuestReadyPageView')" },
                         force: { type: "boolean", description: "If true, rebind even already-bound properties (default: false)" },
+                        mode: { type: "string", enum: ["fuzzy", "strict"], description: "Matching mode: 'fuzzy' (default) or 'strict'" },
                     },
                     required: ["uuid", "componentType"],
                 },
@@ -147,7 +148,7 @@ export class ComponentTools implements ToolCategory {
                 } catch (e: any) { return err(e.message || String(e)); }
             }
             case "component_auto_bind":
-                return this.autoBind(args.uuid, compType, args.force ?? false);
+                return this.autoBind(args.uuid, compType, args.force ?? false, args.mode ?? "fuzzy");
             case "component_query_enum":
                 return this.queryEnum(args.uuid, compType, args.property);
             default:
@@ -221,10 +222,16 @@ export class ComponentTools implements ToolCategory {
 
     /**
      * @property 名とノード名を自動マッチングしてバインドする。
-     * camelCase プロパティ名 → PascalCase ノード名で検索。
-     * Node/Component 参照型で未バインドのプロパティのみ対象。
+     *
+     * - 検索スコープ: 対象ノードの子孫のみ
+     * - 複数ヒット時: 階層の浅いノード（直接の子）を優先
+     * - 型検証: Component 参照型の場合、該当コンポーネントの存在を確認
+     * - 配列対応: @property([Node]) → 連番ノード名 (Slots_0, Slots_1...)
+     * - mode:
+     *   - "fuzzy" (default): 完全一致 → case-insensitive → not_found+候補
+     *   - "strict": 完全一致のみ → not_found+候補
      */
-    private async autoBind(nodeUuid: string, componentType: string, force: boolean): Promise<ToolResult> {
+    private async autoBind(nodeUuid: string, componentType: string, force: boolean, mode: string): Promise<ToolResult> {
         try {
             const nodeDump = await (Editor.Message.request as any)("scene", "query-node", nodeUuid);
             if (!nodeDump) return err("Node not found");
@@ -236,6 +243,11 @@ export class ComponentTools implements ToolCategory {
                 return t === compName || t === `cc.${compName}`;
             });
             if (compIndex < 0) return err(`Component ${componentType} not found on node`);
+
+            // 子孫ノード一覧を一括取得（検索効率化）
+            const allDescendants = await this.sceneScript("getAllDescendants", [nodeUuid]);
+            const descendantList: Array<{uuid: string, name: string, depth: number}> =
+                allDescendants?.success ? allDescendants.data : [];
 
             const compDump = comps[compIndex];
             const properties = compDump.value || {};
@@ -251,49 +263,157 @@ export class ComponentTools implements ToolCategory {
                 if (!propType) continue;
 
                 const extendsArr = (propDump.extends || []) as string[];
+
+                // 配列型の判定
+                const isArray = propType === "Array" || Array.isArray(propDump.value);
+                if (isArray) {
+                    const arrayResult = await this.autoBindArray(nodeUuid, compIndex, propName, propDump, descendantList, mode);
+                    results.push(arrayResult);
+                    continue;
+                }
+
                 const isNodeRef = propType === "cc.Node";
                 const isComponentRef = extendsArr.includes("cc.Component");
-
                 if (!isNodeRef && !isComponentRef) continue;
 
-                // 既にバインド済みならスキップ（force でない限り）
+                // 既にバインド済みならスキップ
                 const currentValue = propDump.value;
                 if (!force && currentValue?.uuid) {
                     results.push({ property: propName, status: "already_bound" });
                     continue;
                 }
 
-                // プロパティ名→ノード名の候補
-                const candidates = this.propertyNameToNodeNames(propName);
+                // 名前マッチ: 完全一致 → fuzzy時は case-insensitive
+                const matchResult = this.findMatchingNode(propName, descendantList, mode);
 
-                let foundNodeUuid: string | null = null;
-                let matchedName: string | null = null;
-                for (const candidate of candidates) {
-                    const searchResult = await this.sceneScript("findNodesByName", [candidate]);
-                    if (searchResult?.success && searchResult.data?.length > 0) {
-                        foundNodeUuid = searchResult.data[0].uuid;
-                        matchedName = candidate;
-                        break;
+                if (matchResult && isComponentRef) {
+                    // 型検証: コンポーネントが存在するか
+                    const hasComp = await this.nodeHasComponent(matchResult.uuid, propType);
+                    if (!hasComp) {
+                        results.push({ property: propName, type: propType, status: "type_mismatch",
+                            nodeName: matchResult.name, message: `Node "${matchResult.name}" has no ${propType} component` });
+                        continue;
                     }
                 }
 
-                if (!foundNodeUuid) {
-                    results.push({ property: propName, type: propType, status: "not_found", candidates });
+                if (!matchResult) {
+                    // 候補サジェスト
+                    const suggestions = this.getSuggestions(propName, descendantList);
+                    results.push({ property: propName, type: propType, status: "not_found", suggestions });
                     continue;
                 }
 
                 const path = `__comps__.${compIndex}.${propName}`;
-                const dump = await this.buildDumpWithTypeInfo(nodeUuid, path, foundNodeUuid);
+                const dump = await this.buildDumpWithTypeInfo(nodeUuid, path, matchResult.uuid);
                 const setResult = await this.sceneScript("setPropertyViaEditor", [nodeUuid, path, dump]);
-                results.push({ property: propName, status: "bound", nodeName: matchedName, success: setResult?.success !== false });
+                const status = matchResult.exact ? "bound" : "fuzzy_bound";
+                results.push({ property: propName, status, nodeName: matchResult.name, success: setResult?.success !== false });
             }
 
-            const boundCount = results.filter(r => r.status === "bound").length;
+            const boundCount = results.filter(r => r.status === "bound" || r.status === "fuzzy_bound").length;
+            const fuzzyCount = results.filter(r => r.status === "fuzzy_bound").length;
             const notFoundCount = results.filter(r => r.status === "not_found").length;
-            return ok({ success: true, boundCount, notFoundCount, results });
+            return ok({ success: true, boundCount, fuzzyCount, notFoundCount, results });
         } catch (e: any) {
             return err(e.message || String(e));
         }
+    }
+
+    /**
+     * 子孫リストからプロパティ名にマッチするノードを検索。
+     * 完全一致を優先、fuzzy モードでは case-insensitive もフォールバック。
+     * 複数ヒット時は階層の浅い（depth が小さい）ものを優先。
+     */
+    private findMatchingNode(
+        propName: string, descendants: Array<{uuid: string, name: string, depth: number}>, mode: string
+    ): { uuid: string; name: string; exact: boolean } | null {
+        const candidates = this.propertyNameToNodeNames(propName);
+
+        // 1. 完全一致
+        for (const candidate of candidates) {
+            const matches = descendants
+                .filter(d => d.name === candidate)
+                .sort((a, b) => a.depth - b.depth);
+            if (matches.length > 0) {
+                return { uuid: matches[0].uuid, name: matches[0].name, exact: true };
+            }
+        }
+
+        // 2. fuzzy: case-insensitive
+        if (mode === "fuzzy") {
+            const lowerCandidates = candidates.map(c => c.toLowerCase());
+            const matches = descendants
+                .filter(d => lowerCandidates.includes(d.name.toLowerCase()))
+                .sort((a, b) => a.depth - b.depth);
+            if (matches.length > 0) {
+                return { uuid: matches[0].uuid, name: matches[0].name, exact: false };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * not_found 時に似た名前のノードをサジェストする。
+     */
+    private getSuggestions(propName: string, descendants: Array<{uuid: string, name: string, depth: number}>): string[] {
+        const lower = propName.toLowerCase();
+        return descendants
+            .filter(d => d.name.toLowerCase().includes(lower) || lower.includes(d.name.toLowerCase()))
+            .map(d => d.name)
+            .slice(0, 5);
+    }
+
+    /**
+     * ノードに指定型のコンポーネントが存在するか確認。
+     */
+    private async nodeHasComponent(nodeUuid: string, propType: string): Promise<boolean> {
+        const typeName = propType.replace("cc.", "");
+        const info = await this.sceneScript("getNodeInfo", [nodeUuid]);
+        if (!info?.success || !info?.data?.components) return false;
+        return info.data.components.some((c: any) => c.type === typeName);
+    }
+
+    /**
+     * 配列 @property の自動バインド。
+     * プロパティ名 "slots" → "Slots_0", "Slots_1", ... の連番ノードを検索。
+     */
+    private async autoBindArray(
+        nodeUuid: string, compIndex: number, propName: string, propDump: any,
+        descendants: Array<{uuid: string, name: string, depth: number}>, mode: string
+    ): Promise<any> {
+        const elementType = propDump.value?.[0]?.type as string | undefined;
+        if (!elementType) {
+            return { property: propName, status: "skip", reason: "empty array or unknown element type" };
+        }
+
+        const pascal = propName.charAt(0).toUpperCase() + propName.slice(1);
+        const foundElements: any[] = [];
+        let index = 0;
+
+        while (true) {
+            const candidateName = `${pascal}_${index}`;
+            // 完全一致 or case-insensitive
+            let match = descendants.find(d => d.name === candidateName);
+            if (!match && mode === "fuzzy") {
+                const lower = candidateName.toLowerCase();
+                match = descendants.find(d => d.name.toLowerCase() === lower);
+            }
+            if (!match) break;
+
+            const elementPath = `__comps__.${compIndex}.${propName}.${index}`;
+            const dump = await this.buildDumpWithTypeInfo(nodeUuid, elementPath, match.uuid);
+            const setResult = await this.sceneScript("setPropertyViaEditor", [nodeUuid, elementPath, dump]);
+            const exact = match.name === candidateName;
+            foundElements.push({ index, nodeName: match.name, exact, success: setResult?.success !== false });
+            index++;
+        }
+
+        if (foundElements.length === 0) {
+            return { property: propName, status: "not_found", type: "Array", candidates: [`${pascal}_0`, `${pascal}_1`, "..."] };
+        }
+        const hasFuzzy = foundElements.some(e => !e.exact);
+        return { property: propName, status: hasFuzzy ? "fuzzy_bound" : "bound", type: "Array", count: foundElements.length, elements: foundElements };
     }
 
     /**

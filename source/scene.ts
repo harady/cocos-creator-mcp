@@ -244,6 +244,53 @@ export const methods: Record<string, (...args: any[]) => any> = {
         }
     },
 
+    /**
+     * 指定ノードの子孫から名前で検索する。auto_bind 用。
+     * rootUuid が空の場合はシーン全体を検索（後方互換）。
+     */
+    findDescendantsByName(rootUuid: string, name: string) {
+        try {
+            let root: any;
+            if (rootUuid) {
+                root = findNode(rootUuid);
+                if (!root) return { success: false, error: `Root node ${rootUuid} not found` };
+            } else {
+                root = getScene();
+                if (!root) return { success: false, error: "No active scene" };
+            }
+
+            const results: any[] = [];
+            const walk = (node: any) => {
+                if (node.name === name) results.push(collectNodeInfo(node));
+                if (node.children) node.children.forEach(walk);
+            };
+            if (root.children) root.children.forEach(walk);
+            return { success: true, data: results };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * 指定ノードの全子孫を depth 付きで返す。auto_bind の一括検索用。
+     */
+    getAllDescendants(rootUuid: string) {
+        try {
+            const root = findNode(rootUuid);
+            if (!root) return { success: false, error: `Node ${rootUuid} not found` };
+
+            const results: Array<{uuid: string, name: string, depth: number}> = [];
+            const walk = (node: any, depth: number) => {
+                results.push({ uuid: node.uuid, name: node.name, depth });
+                if (node.children) node.children.forEach((c: any) => walk(c, depth + 1));
+            };
+            if (root.children) root.children.forEach((c: any) => walk(c, 1));
+            return { success: true, data: results };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    },
+
     findNodesByName(name: string) {
         try {
             const scene = getScene();
