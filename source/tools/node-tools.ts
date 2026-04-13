@@ -303,6 +303,8 @@ export class NodeTools implements ToolCategory {
             if (components && components.length > 0) {
                 for (const comp of components) {
                     await this.sceneScript("addComponentToNode", [uuid, comp]);
+                    // Wait until the component is reflected in query-node
+                    await this.waitForComponent(uuid, comp);
                 }
             }
 
@@ -327,6 +329,27 @@ export class NodeTools implements ToolCategory {
             await new Promise(resolve => setTimeout(resolve, intervalMs));
         }
         // Don't throw — let the caller proceed and get a more specific error if needed
+    }
+
+    /**
+     * Wait until a component added via addComponentToNode is reflected in query-node.
+     * sceneScript returns before the Editor API (query-node) reflects the change,
+     * so polling is needed to avoid race conditions in subsequent tool calls.
+     */
+    private async waitForComponent(nodeUuid: string, componentType: string, maxRetries = 10, intervalMs = 100): Promise<void> {
+        const normalizedType = componentType.startsWith("cc.") ? componentType.substring(3) : componentType;
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const nodeDump = await (Editor.Message.request as any)("scene", "query-node", nodeUuid);
+                const comps: any[] = nodeDump?.__comps__ || [];
+                const found = comps.some((c) =>
+                    c.type === componentType || c.type === `cc.${normalizedType}` || c.type === normalizedType
+                );
+                if (found) return;
+            } catch { /* not ready yet */ }
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+        // Don't throw — component may still work; let caller get a specific error if needed
     }
 
     private async createNodeTree(parentUuid: string, spec: any): Promise<ToolResult> {
