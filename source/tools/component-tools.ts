@@ -1,6 +1,8 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
 import { parseMaybeJson } from "../utils";
+import { resolveNodeUuid } from "../node-resolve";
+import { takeEditorScreenshot } from "../screenshot";
 
 const EXT_NAME = "cocos-creator-mcp";
 
@@ -39,18 +41,19 @@ export class ComponentTools implements ToolCategory {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uuid: { type: "string", description: "Node UUID" },
+                        uuid: { type: "string", description: "Node UUID (either uuid or nodeName required)" },
+                        nodeName: { type: "string", description: "Node name to find (alternative to uuid)" },
                     },
-                    required: ["uuid"],
                 },
             },
             {
                 name: "component_set_property",
-                description: "Set one or more properties on a component. For single: use property+value. For batch: use properties array. Examples: Label.string, Label.fontSize, Sprite.color, UITransform.contentSize.",
+                description: "Set one or more properties on a component. For single: use property+value. For batch: use properties array. Use nodeName instead of uuid to find node by name. Set screenshot=true to capture editor screenshot after changes. Examples: Label.string, Label.fontSize, Sprite.color, UITransform.contentSize.",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uuid: { type: "string", description: "Node UUID" },
+                        uuid: { type: "string", description: "Node UUID (either uuid or nodeName required)" },
+                        nodeName: { type: "string", description: "Node name to find (alternative to uuid — avoids UUID lookup)" },
                         componentType: { type: "string", description: "Component class name (e.g. 'cc.Label')" },
                         property: { type: "string", description: "Property name (single mode)" },
                         value: { description: "Value to set (single mode)" },
@@ -66,8 +69,9 @@ export class ComponentTools implements ToolCategory {
                                 required: ["property", "value"],
                             },
                         },
+                        screenshot: { type: "boolean", description: "If true, capture editor screenshot after setting properties and return the file path (default: false)" },
                     },
-                    required: ["uuid", "componentType"],
+                    required: ["componentType"],
                 },
             },
             {
@@ -92,12 +96,13 @@ export class ComponentTools implements ToolCategory {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uuid: { type: "string", description: "Node UUID (the node with the script component)" },
+                        uuid: { type: "string", description: "Node UUID (either uuid or nodeName required)" },
+                        nodeName: { type: "string", description: "Node name to find (alternative to uuid)" },
                         componentType: { type: "string", description: "Script component class name (e.g. 'QuestReadyPageView')" },
                         force: { type: "boolean", description: "If true, rebind even already-bound properties (default: false)" },
                         mode: { type: "string", enum: ["fuzzy", "strict"], description: "Matching mode: 'fuzzy' (default) or 'strict'" },
                     },
-                    required: ["uuid", "componentType"],
+                    required: ["componentType"],
                 },
             },
             {
@@ -119,6 +124,18 @@ export class ComponentTools implements ToolCategory {
     async execute(toolName: string, args: Record<string, any>): Promise<ToolResult> {
         // パラメータエイリアス: component → componentType
         const compType = args.componentType || args.component;
+
+        // nodeName → uuid 解決（対応ツールのみ）
+        const needsResolve = ["component_set_property", "component_get_components", "component_auto_bind"];
+        if (needsResolve.includes(toolName) && !args.uuid && args.nodeName) {
+            try {
+                const resolved = await resolveNodeUuid({ nodeName: args.nodeName });
+                args.uuid = resolved.uuid;
+            } catch (e: any) {
+                return err(e.message || String(e));
+            }
+        }
+
         switch (toolName) {
             case "component_add":
                 return this.addComponent(args.uuid, compType);
@@ -128,12 +145,28 @@ export class ComponentTools implements ToolCategory {
                 return this.getComponents(args.uuid);
             case "component_set_property": {
                 const properties = parseMaybeJson(args.properties);
+                let result: ToolResult;
                 if (properties && Array.isArray(properties)) {
-                    // バッチモード: properties[].value も parseMaybeJson
                     const parsed = properties.map((p: any) => ({ ...p, value: parseMaybeJson(p.value) }));
-                    return this.setProperties(args.uuid, compType, parsed);
+                    result = await this.setProperties(args.uuid, compType, parsed);
+                } else {
+                    result = await this.setProperty(args.uuid, compType, args.property, parseMaybeJson(args.value));
                 }
-                return this.setProperty(args.uuid, compType, args.property, parseMaybeJson(args.value));
+                // screenshot オプション
+                if (args.screenshot) {
+                    try {
+                        const ss = await takeEditorScreenshot();
+                        const data = JSON.parse(result.content[0].text);
+                        data.screenshot = { path: ss.path, size: ss.savedSize };
+                        return ok(data);
+                    } catch (ssErr: any) {
+                        // スクショ失敗してもプロパティ設定結果は返す
+                        const data = JSON.parse(result.content[0].text);
+                        data.screenshotError = ssErr.message || String(ssErr);
+                        return ok(data);
+                    }
+                }
+                return result;
             }
             case "component_get_info": {
                 try {

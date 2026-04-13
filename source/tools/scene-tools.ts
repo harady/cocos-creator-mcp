@@ -75,12 +75,9 @@ export async function safeSaveScene(): Promise<boolean> {
  *
  * - clean → OK
  * - dirty + 保存先ありのシーン → save-scene で自動保存
- * - dirty + untitled シーン → force=false なら明示エラー、force=true なら警告ログして続行
+ * - dirty + untitled シーン → ダイアログを自動応答（"Don't Save"）して変更を破棄
  *
  * 目的: "Save changes?" ダイアログで MCP がブロックされるのを防ぐ。
- * force=true は「ダイアログが出ないことをユーザーが知っている or 出ても構わない」ケース用。
- *
- * @throws Error force=false かつ dirty + untitled のとき
  */
 export async function ensureSceneSafeToSwitch(force: boolean = false): Promise<void> {
     const isDirty = await queryCurrentSceneDirty();
@@ -90,19 +87,15 @@ export async function ensureSceneSafeToSwitch(force: boolean = false): Promise<v
     const isUntitled = UNTITLED_SCENE_NAMES.has(sceneName);
 
     if (isUntitled) {
-        if (force) {
-            console.warn(
-                `[cocos-creator-mcp] ensureSceneSafeToSwitch: untitled scene "${sceneName}" ` +
-                `is dirty but force=true — proceeding (modal dialog may appear).`
-            );
-            return;
-        }
-        throw new Error(
-            `Cannot switch scenes: current scene "${sceneName || "(unnamed)"}" is untitled ` +
-            `and has unsaved changes. Switching would trigger a modal "Save changes?" dialog ` +
-            `that blocks the MCP server. Save the current scene first ` +
-            `(File > Save Scene As, or scene_save on a named scene), or pass force=true to bypass.`
+        // untitled + dirty: ダイアログが出るとMCPがブロックされるので、
+        // Electron dialog をパッチして「保存しない」を自動応答する。
+        // パッチは次回のシーン切替（呼び出し元の scene_open 等）でダイアログが出る瞬間に効く。
+        patchDialogForDiscard();
+        console.warn(
+            `[cocos-creator-mcp] ensureSceneSafeToSwitch: untitled scene "${sceneName}" ` +
+            `is dirty — dialog will auto-respond "Don't Save" to avoid blocking MCP.`
         );
+        return;
     }
 
     try {
@@ -120,6 +113,69 @@ export async function ensureSceneSafeToSwitch(force: boolean = false): Promise<v
             `Failed to auto-save dirty scene "${sceneName}" before switch: ${e.message || e}. ` +
             `Save manually and retry, or pass force=true to bypass.`
         );
+    }
+}
+
+/**
+ * Electron の dialog.showMessageBox(Sync) を一時的にパッチして、
+ * 次回のダイアログで「保存しない (Don't Save)」を自動選択する。
+ *
+ * CocosCreator の "Save changes?" ダイアログは通常:
+ *   buttons: ["Save", "Cancel", "Don't Save"] → index 2 = Don't Save
+ * または:
+ *   buttons: ["Save", "Don't Save", "Cancel"] → index 1 = Don't Save
+ *
+ * ボタンテキストから "Don't Save" / "not" / "discard" を探し、
+ * 見つからなければ最後のボタン（通常 Don't Save）を選択する。
+ */
+function patchDialogForDiscard(): void {
+    try {
+        const electron = require("electron");
+        const dialog = electron.dialog;
+        const origSync = dialog.showMessageBoxSync;
+        const origAsync = dialog.showMessageBox;
+
+        function findDiscardIndex(buttons: string[]): number {
+            if (!buttons || buttons.length === 0) return 0;
+            const idx = buttons.findIndex((b: string) => {
+                const lower = b.toLowerCase();
+                return lower.includes("don't save") || lower.includes("not")
+                    || lower.includes("discard") || lower.includes("保存しない");
+            });
+            return idx >= 0 ? idx : buttons.length - 1;
+        }
+
+        // Sync version
+        dialog.showMessageBoxSync = function (...args: any[]) {
+            dialog.showMessageBoxSync = origSync; // 1回で復元
+            const options = args.length > 1 ? args[1] : args[0];
+            const buttons = options?.buttons || [];
+            const result = findDiscardIndex(buttons);
+            console.warn(`[cocos-creator-mcp] dialog auto-responded: button[${result}]="${buttons[result] || "?"}" (buttons: ${JSON.stringify(buttons)})`);
+            return result;
+        };
+
+        // Async version
+        dialog.showMessageBox = function (...args: any[]) {
+            dialog.showMessageBox = origAsync; // 1回で復元
+            const options = args.length > 1 ? args[1] : args[0];
+            const buttons = options?.buttons || [];
+            const result = findDiscardIndex(buttons);
+            console.warn(`[cocos-creator-mcp] dialog auto-responded (async): button[${result}]="${buttons[result] || "?"}" (buttons: ${JSON.stringify(buttons)})`);
+            return Promise.resolve({ response: result, checkboxChecked: false });
+        };
+
+        // 安全策: 5秒後に未使用なら復元（次のダイアログが出なかったケース）
+        setTimeout(() => {
+            if (dialog.showMessageBoxSync !== origSync) {
+                dialog.showMessageBoxSync = origSync;
+            }
+            if (dialog.showMessageBox !== origAsync) {
+                dialog.showMessageBox = origAsync;
+            }
+        }, 5000);
+    } catch (e: any) {
+        console.error(`[cocos-creator-mcp] patchDialogForDiscard failed: ${e.message || e}`);
     }
 }
 
