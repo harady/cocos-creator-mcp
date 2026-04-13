@@ -542,6 +542,30 @@ export class NodeTools implements ToolCategory {
                         results.push({ property: `Widget.${key}`, success: true });
                     }
                 }
+
+                // _alignFlags を isAlign* 現在値から再計算して設定
+                // (Editor が isAlign* 変更時に _alignFlags を自動更新しないバグの対処)
+                try {
+                    const ALIGN_BITS: Record<string, number> = {
+                        isAlignLeft: 1, isAlignRight: 2, isAlignTop: 4, isAlignBottom: 8,
+                        isAlignHorizontalCenter: 16, isAlignVerticalCenter: 32,
+                    };
+                    const nodeDump = await (Editor.Message.request as any)("scene", "query-node", uuid);
+                    if (nodeDump) {
+                        const wCompDump = nodeDump.__comps__?.[wIdx];
+                        if (wCompDump) {
+                            let alignFlags = 0;
+                            for (const [key, bit] of Object.entries(ALIGN_BITS)) {
+                                if (wCompDump.value?.[key]?.value === true) alignFlags |= bit;
+                            }
+                            const flagPath = `__comps__.${wIdx}._alignFlags`;
+                            await this.sceneScript("setPropertyViaEditor", [uuid, flagPath, { value: alignFlags, type: "Number" }]);
+                            results.push({ property: "Widget._alignFlags", value: alignFlags });
+                        }
+                    }
+                } catch (_e) {
+                    // _alignFlags 再計算の失敗は致命的でないため無視
+                }
             }
 
             // color

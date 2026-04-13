@@ -481,6 +481,13 @@ export class ComponentTools implements ToolCategory {
             const dump = await this.buildDumpWithTypeInfo(uuid, path, value);
 
             const result = await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
+
+            // cc.Widget の isAlign* 設定後は _alignFlags を再計算する
+            // (Editor が isAlign* 変更時に _alignFlags を自動更新しないバグの対処)
+            if (componentType === "cc.Widget" && property.startsWith("isAlign")) {
+                await this.recalcWidgetAlignFlags(uuid, compIndex);
+            }
+
             return ok({ success: true, path, dump, result });
         } catch (e: any) {
             return err(e.message || String(e));
@@ -512,9 +519,47 @@ export class ComponentTools implements ToolCategory {
             }
 
             const allOk = results.every(r => r.success);
+
+            // cc.Widget の isAlign* 設定後は _alignFlags を再計算する
+            // (Editor が isAlign* 変更時に _alignFlags を自動更新しないバグの対処)
+            if (componentType === "cc.Widget" && properties.some(p => p.property.startsWith("isAlign"))) {
+                await this.recalcWidgetAlignFlags(uuid, compIndex);
+            }
+
             return ok({ success: allOk, results });
         } catch (e: any) {
             return err(e.message || String(e));
+        }
+    }
+
+    /**
+     * cc.Widget の isAlign* プロパティ現在値から _alignFlags ビットマスクを再計算して設定する。
+     *
+     * CocosCreator Editor は isAlign* を setPropertyViaEditor で変更しても
+     * _alignFlags を自動更新しないバグがある。このヘルパーで明示的に同期する。
+     *
+     * _alignFlags ビット定義:
+     *   isAlignLeft=1, isAlignRight=2, isAlignTop=4, isAlignBottom=8,
+     *   isAlignHorizontalCenter=16, isAlignVerticalCenter=32
+     */
+    private async recalcWidgetAlignFlags(uuid: string, wIdx: number): Promise<void> {
+        const ALIGN_BITS: Record<string, number> = {
+            isAlignLeft: 1, isAlignRight: 2, isAlignTop: 4, isAlignBottom: 8,
+            isAlignHorizontalCenter: 16, isAlignVerticalCenter: 32,
+        };
+        try {
+            const nodeDump = await (Editor.Message.request as any)("scene", "query-node", uuid);
+            if (!nodeDump) return;
+            const wCompDump = nodeDump.__comps__?.[wIdx];
+            if (!wCompDump) return;
+            let alignFlags = 0;
+            for (const [key, bit] of Object.entries(ALIGN_BITS)) {
+                if (wCompDump.value?.[key]?.value === true) alignFlags |= bit;
+            }
+            const path = `__comps__.${wIdx}._alignFlags`;
+            await this.sceneScript("setPropertyViaEditor", [uuid, path, { value: alignFlags, type: "Number" }]);
+        } catch (_e) {
+            // _alignFlags 再計算の失敗は致命的でないため無視
         }
     }
 
