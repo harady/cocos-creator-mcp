@@ -6,7 +6,7 @@ AI assistants like Claude can control Cocos Creator editor through this extensio
 
 ## Features
 
-- **149 Tools** across 13 categories — comprehensive editor automation
+- **164 Tools** across 13 categories — comprehensive editor automation
 - **Streamable HTTP (SSE)** — Native support for MCP's Streamable HTTP transport
 - **JSON-RPC 2.0** — Standard MCP protocol compliance
 - **Prefab Property Persistence** — Component properties are correctly preserved when saving prefabs
@@ -19,7 +19,7 @@ AI assistants like Claude can control Cocos Creator editor through this extensio
 - **Tool Call Logging** — All tool invocations logged with timing for debugging
 - **UUID Validation** — Input validation helpers for better error messages
 - **i18n** — English, Japanese, Chinese
-- **Regression Tests** — 265 assertions covering all 156 tools
+- **Regression Tests** — 200+ assertions covering core tool flows
 
 ## Quick Start
 
@@ -108,10 +108,10 @@ clients can still complete a pro-forma flow on localhost.
 
 ```bash
 curl http://127.0.0.1:3000/health
-# {"status":"ok","tools":145}
+# {"status":"ok","tools":164}
 ```
 
-## Available Tools (145)
+## Available Tools (164)
 
 <details>
 <summary><strong>Scene (6)</strong> — Scene lifecycle and hierarchy</summary>
@@ -127,7 +127,7 @@ curl http://127.0.0.1:3000/health
 </details>
 
 <details>
-<summary><strong>Scene Advanced (22)</strong> — Undo, clipboard, queries, property manipulation</summary>
+<summary><strong>Scene Advanced (30)</strong> — Undo, clipboard, queries, property manipulation</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -190,7 +190,7 @@ curl http://127.0.0.1:3000/health
 </details>
 
 <details>
-<summary><strong>Node (12)</strong> — Create, edit, move, delete nodes</summary>
+<summary><strong>Node (14)</strong> — Create, edit, move, delete nodes</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -206,10 +206,12 @@ curl http://127.0.0.1:3000/health
 | `node_duplicate` | Duplicate node |
 | `node_get_all` | List all nodes |
 | `node_detect_type` | Detect node type (2D/3D/Node) |
+| `node_create_tree` | Create a node hierarchy in one call (v1.6) |
+| `node_set_layout` | Set UITransform + Widget + color/opacity at once (v1.13) |
 </details>
 
 <details>
-<summary><strong>Component (6)</strong> — Add, remove, configure components</summary>
+<summary><strong>Component (8)</strong> — Add, remove, configure components</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -219,10 +221,12 @@ curl http://127.0.0.1:3000/health
 | `component_set_property` | Set component property (Label.string, fontSize, etc.) |
 | `component_get_info` | Get full component dump by UUID |
 | `component_get_available` | List all available component classes |
+| `component_auto_bind` | Auto-match `@property` fields to nodes by name (v1.12) |
+| `component_query_enum` | Query enum values of a component property (v1.6) |
 </details>
 
 <details>
-<summary><strong>Prefab (8)</strong> — Prefab lifecycle and validation</summary>
+<summary><strong>Prefab (12)</strong> — Prefab lifecycle and validation</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -234,6 +238,10 @@ curl http://127.0.0.1:3000/health
 | `prefab_revert` | Revert prefab instance to original |
 | `prefab_duplicate` | Copy prefab to new path |
 | `prefab_validate` | Validate prefab for broken references |
+| `prefab_open` | Open prefab for editing (v1.5) |
+| `prefab_close` | Close prefab editing mode and return to scene (v1.5) |
+| `prefab_create_and_replace` | Create prefab and replace instance in one call (v1.5) |
+| `prefab_create_from_spec` | Create node tree + auto-bind + prefab_create in one call (v1.12) |
 </details>
 
 <details>
@@ -288,7 +296,7 @@ curl http://127.0.0.1:3000/health
 </details>
 
 <details>
-<summary><strong>Debug (21)</strong> — Editor info, logs, preview, screenshots, recording, game control</summary>
+<summary><strong>Debug (22)</strong> — Editor info, logs, preview, screenshots, recording, game control</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -313,10 +321,11 @@ curl http://127.0.0.1:3000/health
 | `debug_validate_scene` | Validate scene for common issues |
 | `debug_query_devices` | List connected devices |
 | `debug_open_url` | Open URL in system browser |
+| `debug_wait_compile` | Wait for TypeScript compile to finish (v1.12) |
 </details>
 
 <details>
-<summary><strong>Server (5)</strong> — Editor server and network</summary>
+<summary><strong>Server (7)</strong> — Editor server and network</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -325,6 +334,8 @@ curl http://127.0.0.1:3000/health
 | `server_get_status` | Get full server status |
 | `server_check_connectivity` | Check if editor server is reachable |
 | `server_get_network_interfaces` | Get network interface details |
+| `server_get_build_hash` | Get build hash of MCP dist files (v1.6) |
+| `server_check_code_sync` | Check if runtime matches dist hash (v1.6) |
 </details>
 
 <details>
@@ -498,6 +509,9 @@ node test/regression.mjs 3001    # custom port
 - **v1.9.0** — Preview Recorder auto-archive of old recordings + preflight "preview not running" check
 - **v1.10.0** — `scene_create` asset-db fallback, stringified args preventive validation, test coverage expansion
 - **v1.11.0** — HTTP MCP OAuth workaround (stdio bridge + dummy OAuth endpoints for Claude Code VSCode upstream bug) + dialog prevention for scene switching tools (`force` param, `ensureSceneSafeToSwitch`, `safeSaveScene`) + regression tests for both
+- **v1.12.0** — Prefab authoring efficiency: `component_auto_bind` (auto-match `@property` fields to node names), `debug_wait_compile` (wait for TS compile to finish), `prefab_create_from_spec` (create node tree + auto-bind + prefab_create in one call)
+- **v1.13.0** — `nodeName` parameter on component/get_components/auto_bind (no UUID required), `screenshot` auto-return option on `component_set_property` / `node_set_layout`, `node_set_layout` unified tool (UITransform + Widget + color/opacity in one call), dialog auto-response for untitled+dirty scenes, shared screenshot / node-resolve utilities
+- **v1.14.0** — Widget `_alignFlags` auto-recalc bug fix: `setProperty` / `setProperties` / `node_set_layout` now re-query `isAlign*` values from scene and rebuild `_alignFlags` bitmask after isAlign updates (Editor bug where bitmask was not updated automatically, causing prefabs to save with `_alignFlags: 45` stuck state). Also `node_create` component addition now waits for editor reflection (`waitForComponent`) to fix flaky tests
 
 ## Development
 

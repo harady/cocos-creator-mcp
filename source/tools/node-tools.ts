@@ -303,6 +303,8 @@ export class NodeTools implements ToolCategory {
             if (components && components.length > 0) {
                 for (const comp of components) {
                     await this.sceneScript("addComponentToNode", [uuid, comp]);
+                    // Wait until the component is reflected in query-node
+                    await this.waitForComponent(uuid, comp);
                 }
             }
 
@@ -327,6 +329,27 @@ export class NodeTools implements ToolCategory {
             await new Promise(resolve => setTimeout(resolve, intervalMs));
         }
         // Don't throw — let the caller proceed and get a more specific error if needed
+    }
+
+    /**
+     * Wait until a component added via addComponentToNode is reflected in query-node.
+     * sceneScript returns before the Editor API (query-node) reflects the change,
+     * so polling is needed to avoid race conditions in subsequent tool calls.
+     */
+    private async waitForComponent(nodeUuid: string, componentType: string, maxRetries = 10, intervalMs = 100): Promise<void> {
+        const normalizedType = componentType.startsWith("cc.") ? componentType.substring(3) : componentType;
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const nodeDump = await (Editor.Message.request as any)("scene", "query-node", nodeUuid);
+                const comps: any[] = nodeDump?.__comps__ || [];
+                const found = comps.some((c) =>
+                    c.type === componentType || c.type === `cc.${normalizedType}` || c.type === normalizedType
+                );
+                if (found) return;
+            } catch { /* not ready yet */ }
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+        // Don't throw — component may still work; let caller get a specific error if needed
     }
 
     private async createNodeTree(parentUuid: string, spec: any): Promise<ToolResult> {
@@ -518,6 +541,30 @@ export class NodeTools implements ToolCategory {
                         await this.sceneScript("setPropertyViaEditor", [uuid, path, dump]);
                         results.push({ property: `Widget.${key}`, success: true });
                     }
+                }
+
+                // _alignFlags を isAlign* 現在値から再計算して設定
+                // (Editor が isAlign* 変更時に _alignFlags を自動更新しないバグの対処)
+                try {
+                    const ALIGN_BITS: Record<string, number> = {
+                        isAlignLeft: 1, isAlignRight: 2, isAlignTop: 4, isAlignBottom: 8,
+                        isAlignHorizontalCenter: 16, isAlignVerticalCenter: 32,
+                    };
+                    const nodeDump = await (Editor.Message.request as any)("scene", "query-node", uuid);
+                    if (nodeDump) {
+                        const wCompDump = nodeDump.__comps__?.[wIdx];
+                        if (wCompDump) {
+                            let alignFlags = 0;
+                            for (const [key, bit] of Object.entries(ALIGN_BITS)) {
+                                if (wCompDump.value?.[key]?.value === true) alignFlags |= bit;
+                            }
+                            const flagPath = `__comps__.${wIdx}._alignFlags`;
+                            await this.sceneScript("setPropertyViaEditor", [uuid, flagPath, { value: alignFlags, type: "Number" }]);
+                            results.push({ property: "Widget._alignFlags", value: alignFlags });
+                        }
+                    }
+                } catch (_e) {
+                    // _alignFlags 再計算の失敗は致命的でないため無視
                 }
             }
 

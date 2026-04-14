@@ -590,7 +590,7 @@ export class SceneAdvancedTools implements ToolCategory {
                 __editorExtras__: {},
                 node: { __id__: 2 },
                 _enabled: true,
-                _alignFlags: 45,
+                _alignFlags: 15,
                 _target: null,
                 _left: 0,
                 _right: 0,
