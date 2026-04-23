@@ -534,6 +534,19 @@ After building, reload the extension in Cocos Creator:
 
 - **`scene_create`**: Does not work on Cocos Creator 3.8.x because the underlying `scene:new-scene` Editor message is not exposed on that version. As a workaround, create the `.scene` JSON file directly under `db://assets/` and call `project_refresh_assets` so the editor picks it up. See [#13](https://github.com/harady/cocos-creator-mcp/issues/13) for details.
 
+- **`prefab_create_from_spec` — asset refs are saved as raw UUID strings**:
+  When the spec's `properties` contains asset references like `cc.Sprite.spriteFrame` or `cc.Prefab` fields, they are serialized to the generated `.prefab` as raw UUID strings instead of the required `{__uuid__, __expectedType__}` object form. The Cocos runtime fails to resolve them (e.g. `Simple.updateUVs` throws every frame for a Sprite with unresolved spriteFrame). Workaround: post-process the generated `.prefab` files to wrap asset refs.
+
+  Example fix script:
+  ```js
+  // fix-prefab-asset-refs.js — run after prefab_create_from_spec
+  const re = /"_spriteFrame":\s*"([a-f0-9\-]+(?:@[a-z0-9]+)?)"/g;
+  content = content.replace(re, (_, uuid) =>
+    `"_spriteFrame": { "__uuid__": "${uuid}", "__expectedType__": "cc.SpriteFrame" }`
+  );
+  ```
+  The same pattern also applies when setting `cc.Prefab` fields via `component_set_property` — the value object form is ignored and the raw UUID is written. Direct `.prefab` JSON edit is the reliable workaround until fixed.
+
 ## License
 
 MIT
