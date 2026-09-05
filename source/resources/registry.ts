@@ -51,7 +51,19 @@ export class ResourceRegistry {
             if (d.uriTemplate) {
                 const re = uriTemplateToRegExp(d.uriTemplate);
                 const m = re.exec(uri);
-                if (m) return { def: d, params: m.groups ? { ...m.groups } : {} };
+                if (m) {
+                    const params: Record<string, string> = {};
+                    try {
+                        for (const [key, value] of Object.entries(m.groups || {})) {
+                            // Cocos short UUIDs may contain '/' and '+'. Clients
+                            // percent-encode template values to keep them in one segment.
+                            params[key] = decodeURIComponent(value);
+                        }
+                    } catch {
+                        return null; // Invalid percent encoding is not a valid resource URI.
+                    }
+                    return { def: d, params };
+                }
             }
         }
         return null;

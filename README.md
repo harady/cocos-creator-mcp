@@ -340,6 +340,18 @@ Settings are stored in `{project}/settings/cocos-creator-mcp.json`:
 
 ## Testing
 
+Scene creation and resource URI compatibility checks (no running editor required):
+
+```bash
+npm run build
+node test/scene-create-compat.cjs
+node test/resource-uri-compat.cjs
+```
+
+These checks also run with the Node 14.16 runtime embedded in Creator 3.8.3.
+For resource templates, percent-encode UUID values (for example,
+`cocos://node/${encodeURIComponent(uuid)}/components`): Cocos short UUIDs can contain `/` and `+`.
+
 ```bash
 node test/regression.mjs         # default port 3000
 node test/regression.mjs 3001    # custom port
@@ -387,7 +399,7 @@ After building, reload the extension in Cocos Creator:
 ## Requirements
 
 - Cocos Creator 3.8+
-- Node.js 18+
+- Node.js 18+ for building the extension and running the HTTP regression client. The installed extension runs inside Creator's embedded Node runtime (including Node 14.16 in Creator 3.8.3).
 
 ## Value Reference Forms (v2.0.0)
 
@@ -440,7 +452,7 @@ These also work inside `prefab_create_from_spec`'s `spec.properties` because the
 
 ## Known Limitations
 
-- **`scene_create`**: Does not work on Cocos Creator 3.8.x because the underlying `scene:new-scene` Editor message is not exposed on that version. As a workaround, create the `.scene` JSON file directly under `db://assets/` and call `project_refresh_assets` so the editor picks it up. See [#13](https://github.com/harady/cocos-creator-mcp/issues/13) for details.
+- **`scene_create`**: On Creator 3.8.x, where `scene:new-scene` is unavailable, the tool creates a minimal 2D scene through the asset database. Both explicit paths and the automatically generated path are supported. The tool verifies that the created scene opened successfully; a failed open returns an error while leaving the created asset available for inspection. See [#13](https://github.com/harady/cocos-creator-mcp/issues/13) for background.
 
 - ~~**`prefab_create_from_spec` — asset refs are saved as raw UUID strings**~~ **(fixed in v2.0.0)** — Properties in `spec.properties` are now reapplied via the Editor API (`component_set_property`) after `buildNodeTree` completes, so asset refs serialize as `{__uuid__, __expectedType__}` correctly. The old workaround of post-processing `.prefab` files is no longer needed.
 
