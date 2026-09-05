@@ -1,6 +1,7 @@
 import { ToolCategory, ToolDefinition, ToolResult } from "../types";
 import { ok, err } from "../tool-base";
 import { ensureSceneSafeToSwitch } from "./scene-tools";
+import { randomBytes } from "crypto";
 
 const EXT_NAME = "cocos-creator-mcp";
 
@@ -348,7 +349,15 @@ export class SceneAdvancedTools implements ToolCategory {
             if (!path.endsWith(".scene")) path += ".scene";
 
             const sceneName = path.split("/").pop()!.replace(".scene", "");
-            const uid = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            // Creator 3.8.3 embeds Node 14.16: neither global crypto nor
+            // crypto.randomUUID is available. Generate an RFC 4122 v4 UUID.
+            const uid = () => {
+                const bytes = randomBytes(16);
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                const hex = bytes.toString("hex");
+                return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+            };
             const sid = () => {
                 const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
                 let s = "";
@@ -361,14 +370,15 @@ export class SceneAdvancedTools implements ToolCategory {
 
             await (Editor.Message.request as any)("asset-db", "create-asset", path, content);
 
-            // シーンを開く
-            try {
-                // ensureSceneSafeToSwitch は createScene 入口で既に通過済みなのでここでは再チェックしない
-                const queryResult = await (Editor.Message.request as any)("asset-db", "query-uuid", path);
-                if (queryResult) {
-                    await (Editor.Message.request as any)("scene", "open-scene", queryResult);
-                }
-            } catch { /* open failure is not critical */ }
+            // Verify that the created asset actually opened: some editor versions
+            // log a load error and switch to an empty scene without rejecting.
+            const queryResult = await (Editor.Message.request as any)("asset-db", "query-uuid", path);
+            if (!queryResult) throw new Error(`Created scene has no asset UUID: ${path}`);
+            await (Editor.Message.request as any)("scene", "open-scene", queryResult);
+            const current = await (Editor.Message.request as any)("scene", "query-node-tree");
+            if (current?.uuid !== queryResult) {
+                throw new Error(`Scene asset was created but could not be opened: ${path}`);
+            }
 
             return ok({ success: true, path, method: "asset-db-fallback" });
         } catch (e: any) {
@@ -412,7 +422,7 @@ export class SceneAdvancedTools implements ToolCategory {
                 _layer: 1073741824,
                 _euler: vec3(0, 0, 0),
                 autoReleaseAssets: false,
-                _globals: { __id__: 10 },
+                _globals: { __id__: 8 },
                 _id: sceneId,
             },
             // [2] Canvas node
@@ -522,23 +532,21 @@ export class SceneAdvancedTools implements ToolCategory {
                 _originalHeight: 0,
                 _id: "",
             },
-            // [8] cc.PrefabInfo for scene
-            // [9] (reserved)
-            // [10] SceneGlobals
+            // [8] SceneGlobals
             {
                 __type__: "cc.SceneGlobals",
-                ambient: { __id__: 11 },
-                shadows: { __id__: 12 },
-                _skybox: { __id__: 13 },
-                fog: { __id__: 14 },
+                ambient: { __id__: 9 },
+                shadows: { __id__: 10 },
+                _skybox: { __id__: 11 },
+                fog: { __id__: 12 },
             },
-            // [11] AmbientInfo
+            // [9] AmbientInfo
             { __type__: "cc.AmbientInfo", _skyLightingColor: { __type__: "cc.Vec4", x: 0.2, y: 0.2, z: 0.2, w: 1 } },
-            // [12] ShadowsInfo
+            // [10] ShadowsInfo
             { __type__: "cc.ShadowsInfo" },
-            // [13] SkyboxInfo
+            // [11] SkyboxInfo
             { __type__: "cc.SkyboxInfo" },
-            // [14] FogInfo
+            // [12] FogInfo
             { __type__: "cc.FogInfo" },
         ];
     }
