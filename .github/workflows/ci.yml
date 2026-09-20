@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build and compatibility checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Compatibility checks
+        run: npm run test:compat
+
+      # dist/ is gitignored but tracked, so a file emitted by a newly added
+      # source module never shows up in `git status` and silently never ships.
+      # That is how dist/resources/*.js went missing from v2.0.0 until #34.
+      - name: Every built file is tracked
+        run: |
+          untracked=$(comm -13 <(git ls-files dist | sort) <(find dist -type f -name '*.js' | sort))
+          if [ -n "$untracked" ]; then
+            echo "::error::These build outputs are not tracked, so they are missing from the published extension:"
+            echo "$untracked"
+            echo "Add them with: git add -f <path>"
+            exit 1
+          fi
+          echo "All $(find dist -type f -name '*.js' | wc -l) built .js files are tracked."
+
+  shipped-extension-loads:
+    # Loads only what the repository actually contains -- what someone who
+    # installs the repo as an extension gets -- rather than the local build
+    # tree, which always looks complete even when the committed one is not.
+    name: Tracked dist/ is loadable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract the tracked dist/ and load the entry point
+        run: |
+          target=$(mktemp -d)
+          git archive HEAD dist | tar -x -C "$target"
+          cd "$target"
+          node -e "require('./dist/mcp-server.js')"
+          echo "Tracked dist/ loads cleanly."
+
+  dist-up-to-date:
+    # Contributors are not expected to commit dist/; the maintainer rebuilds it
+    # in a chore(release) commit. This job therefore runs on main only, and goes
+    # red between merging a fix and shipping it, so a merged fix cannot sit
+    # unpublished without anyone noticing.
+    name: Committed dist/ matches a fresh build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Compare
+        run: |
+          if ! git diff --exit-code --stat -- dist; then
+            echo "::error::dist/ is stale. Rebuild and commit it so the merged fix reaches users."
+            exit 1
+          fi
+          echo "dist/ is up to date."
