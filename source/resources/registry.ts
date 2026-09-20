@@ -60,7 +60,7 @@ export class ResourceRegistry {
                             params[key] = decodeURIComponent(value);
                         }
                     } catch {
-                        return null; // Invalid percent encoding is not a valid resource URI.
+                        continue; // Invalid percent encoding: this def cannot match, try the next.
                     }
                     return { def: d, params };
                 }

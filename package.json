@@ -1,14 +1,15 @@
 {
     "package_version": 2,
     "name": "cocos-creator-mcp",
-    "version": "2.0.1",
+    "version": "2.0.2",
     "author": "harady",
     "editor": ">=3.8.0",
     "scripts": {
         "build": "tsc && node scripts/postbuild.js",
-        "watch": "tsc -w"
+        "watch": "tsc -w",
+        "test:compat": "node test/scene-create-compat.cjs && node test/resource-uri-compat.cjs"
     },
-    "description": "MCP Server for Cocos Creator [42ba1582407a]",
+    "description": "MCP Server for Cocos Creator [45611bcef8d2]",
     "main": "./dist/main.js",
     "dependencies": {
         "vue": "^3.1.4",

@@ -377,7 +377,13 @@ export class SceneAdvancedTools implements ToolCategory {
             await (Editor.Message.request as any)("scene", "open-scene", queryResult);
             const current = await (Editor.Message.request as any)("scene", "query-node-tree");
             if (current?.uuid !== queryResult) {
-                throw new Error(`Scene asset was created but could not be opened: ${path}`);
+                // Include both UUIDs: on Creator versions where the editor does not
+                // overwrite the scene node UUID with the asset UUID, this check can
+                // fail even though the scene opened fine. The values make that obvious.
+                throw new Error(
+                    `Scene asset was created but could not be opened: ${path} ` +
+                    `(expected active scene ${queryResult}, got ${current?.uuid ?? "none"})`
+                );
             }
 
             return ok({ success: true, path, method: "asset-db-fallback" });

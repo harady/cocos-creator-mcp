@@ -2,6 +2,33 @@
 
 All notable changes to **cocos-creator-mcp**.
 
+## [2.0.2] - 2026-09-21 — Cocos Creator 3.8.3 compatibility
+
+Thanks to [@mouzhi](https://github.com/mouzhi) for [#33](https://github.com/harady/cocos-creator-mcp/pull/33).
+
+### Fixed
+
+- **`scene_create` now works on Creator 3.8.x.** Three separate defects were fixed:
+  - `crypto.randomUUID?.()` threw on Creator 3.8.3, whose embedded Node 14.16 has no global `crypto` at all. UUIDs are now generated with `crypto.randomBytes` (RFC 4122 v4).
+  - The generated scene JSON referenced `SceneGlobals` and its `ambient` / `shadows` / `_skybox` / `fog` children two indices too high, so every generated scene was malformed and failed to load.
+  - A failed `open-scene` was swallowed and the tool reported success anyway. The active scene UUID is now verified after opening, and a failed open returns an error while leaving the created asset in place for inspection.
+- **Resource URIs accept percent-encoded UUIDs.** Cocos short UUIDs can contain `/` and `+`; template parameters are now decoded exactly once, so `cocos://node/${encodeURIComponent(uuid)}/components` resolves. Invalid percent encoding yields no match instead of an exception.
+
+### Added
+
+- `npm run test:compat` — standalone regression checks (`test/scene-create-compat.cjs`, `test/resource-uri-compat.cjs`) that run without a live editor, and under the Node 14.16 runtime embedded in Creator 3.8.3.
+
+### Notes
+
+- Clients must percent-encode UUID values in resource template URIs. Plain UUIDs without `/` or `+` are unaffected.
+- `Requirements` clarified: Node.js 18+ is needed to build the extension and run the HTTP regression client; the installed extension itself runs inside Creator's embedded Node runtime.
+
+## [2.0.1] - 2026-07-25 — Patch
+
+### Fixed
+
+- **`prefab_edit` with `action: "close"` silently skipped the save.** Edits are now persisted on close ([#32](https://github.com/harady/cocos-creator-mcp/pull/32), thanks to [@Brandonyy](https://github.com/Brandonyy)).
+
 ## [2.0.0] - 2026-05-28 — MAJOR (breaking)
 
 ### Summary

@@ -344,8 +344,7 @@ Scene creation and resource URI compatibility checks (no running editor required
 
 ```bash
 npm run build
-node test/scene-create-compat.cjs
-node test/resource-uri-compat.cjs
+npm run test:compat
 ```
 
 These checks also run with the Node 14.16 runtime embedded in Creator 3.8.3.
