@@ -56,30 +56,30 @@ jobs:
           node -e "require('./dist/mcp-server.js')"
           echo "Tracked dist/ loads cleanly."
 
-  dist-up-to-date:
-    # Contributors are not expected to commit dist/; the maintainer rebuilds it
-    # in a chore(release) commit. This job therefore runs on main only, and goes
-    # red between merging a fix and shipping it, so a merged fix cannot sit
-    # unpublished without anyone noticing.
-    name: Committed dist/ matches a fresh build
+  dist-is-current:
+    # Contributors are not asked to commit dist/; the maintainer rebuilds it in a
+    # chore(release) commit. So this runs on main only, and is red between merging
+    # a fix and shipping it -- the reminder that was missing when #33 merged.
+    #
+    # It compares commits rather than rebuilding, because the build is not
+    # reproducible across platforms: inlineSources embeds the .ts files verbatim,
+    # so a dist/ built on Windows (CRLF sources) never matches one built on Linux.
+    name: dist/ has been rebuilt since the last source change
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: 18
-          cache: npm
+          fetch-depth: 0
 
-      - run: npm ci
-
-      - run: npm run build
-
-      - name: Compare
+      - name: Compare last source change against last build
         run: |
-          if ! git diff --exit-code --stat -- dist; then
-            echo "::error::dist/ is stale. Rebuild and commit it so the merged fix reaches users."
+          source_commit=$(git rev-list -1 HEAD -- source tsconfig.json package.json)
+          dist_commit=$(git rev-list -1 HEAD -- dist)
+          echo "last source change: $(git log -1 --format='%h %s' "$source_commit")"
+          echo "last dist build:    $(git log -1 --format='%h %s' "$dist_commit")"
+          if ! git merge-base --is-ancestor "$source_commit" "$dist_commit"; then
+            echo "::error::dist/ predates the latest source change, so the merged fix is not in the published extension. Run npm run build and commit dist/ (chore(release))."
             exit 1
           fi
-          echo "dist/ is up to date."
+          echo "dist/ includes the latest source change."
